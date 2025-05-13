@@ -72,9 +72,11 @@ class AdaGramPS(Optimizer):
                 if len(state) == 0:
                     state["U"] = torch.zeros(n, 0, device=grad.device, dtype=grad.dtype)
                     state["V"] = torch.zeros(n, 0, device=grad.device, dtype=grad.dtype)
-                    state["Lt"] = torch.eye(
+                    state["Lt_inv"] = torch.eye(
                         n, device=grad.device, dtype=grad.dtype
-                    ) / math.sqrt(eps)
+                    ) * math.sqrt(
+                        1.0 / eps
+                    )  # Initialize with L_0^(-1)
 
                 if group["weight_decay"] != 0:
                     grad_vector = grad_vector.add(
@@ -85,12 +87,8 @@ class AdaGramPS(Optimizer):
                 # Using the recursive formula from equation (8) in Lemma 1:
                 # L_t^(-1) = (I - U_t * V_t^T) * L_0^(-1)
 
-                # First apply L_0^(-1) = (1/sqrt(eps)) * I
-                g_bar = state["Lt"] @ grad_vector
-
-                # # Then apply (I - U_t * V_t^T)
-                # if state['U'].shape[1] > 0:  # Check if U_t is not empty
-                #     g_bar = g_bar - state['U'] @ (state['V'].t() @ g_bar)
+                # Apply L_t^(-1) to the gradient
+                g_bar = state["Lt_inv"] @ grad_vector
 
                 # Compute ||g_bar||^2
                 g_bar_norm_sq = torch.dot(g_bar, g_bar)
@@ -105,18 +103,13 @@ class AdaGramPS(Optimizer):
                 # U_{t+1} = [U_t  beta_{t+1}*g_{t+1}]
                 # V_{t+1} = [V_t  g_bar_{t+1}]
 
-                # Scale beta_g by L_0^(-1) since it's applied to g_{t+1}
-                beta_g = beta * g_bar
-
-                # Reshape to column vectors for concatenation
-                beta_g = beta_g.reshape(-1, 1)
+                # Create the column vectors for concatenation
+                beta_g = (beta * grad_vector).reshape(-1, 1)
                 g_bar_col = g_bar.reshape(-1, 1)
-
-                second_part = torch.eye() - state["V"] @ state["U"].T
 
                 # Update U and V
                 state["U"] = torch.cat([state["U"], beta_g], dim=1)
-                state["V"] = torch.cat([state["V"], second_part @ g_bar_col], dim=1)
+                state["V"] = torch.cat([state["V"], g_bar_col], dim=1)
 
                 # Limit the rank if max_rank is specified
                 max_rank = group.get("max_rank")
@@ -124,12 +117,22 @@ class AdaGramPS(Optimizer):
                     state["U"] = state["U"][:, -max_rank:]
                     state["V"] = state["V"][:, -max_rank:]
 
-                state["Lt"] = (torch.eye() - state["V"] @ state["U"].T) @ state["Lt"]
+                # Update L_t^(-1) for the next iteration
+                # L_{t+1}^(-1) = (I - U_{t+1} * V_{t+1}^T) * L_0^(-1)
+                identity = torch.eye(n, device=grad.device, dtype=grad.dtype)
+                L0_inv = identity * math.sqrt(1.0 / eps)
+
+                # Only compute UV^T if we have factors
+                if state["U"].shape[1] > 0:
+                    UV_t = state["U"] @ state["V"].t()
+                    state["Lt_inv"] = (identity - UV_t) @ L0_inv
+                else:
+                    state["Lt_inv"] = L0_inv
 
                 # Compute the preconditioned gradient using equation (4):
-                # L_{t+1}^(-1) * g_{t+1} = (1/sqrt(1 + ||L_t^(-1)*g_{t+1}||^2)) * L_t^(-1)*g_{t+1}
+                # The update is x_{t+1} = x_t - η * (1/sqrt(1 + ||g_bar||^2)) * g_bar
                 precond_grad = g_bar / torch.sqrt(1 + g_bar_norm_sq)
-                param_vector.add_(-precond_grad, alpha=-group["lr"])
+                param_vector.add_(precond_grad, alpha=-group["lr"])
 
                 p.data = param_vector.reshape(original_shape)
 
