@@ -78,31 +78,30 @@ class AdaGram(Optimizer):
                         param_vector, alpha=group["weight_decay"]
                     )
 
-                # Compute g_bar = Lt^-1 * g (equation from theorem)
+                # g_bar = Lt^-1 * g (equation from theorem)
                 g_bar = state["Lt_inv"] @ grad_vector
                 g_bar_norm_sq = torch.dot(g_bar, g_bar)
 
-                # Compute alpha according to equation (6)
+                # equation (6)
                 alpha = self._compute_alpha(g_bar_norm_sq, eps)
 
-                # Compute beta according to the formula below equation (7)
+                # equation (7)
                 beta = self._compute_beta(alpha, g_bar_norm_sq)
 
-                # Reshape g_bar for outer product calculation
-                g_bar_col = g_bar.reshape(-1, 1)
+                g_bar_col = g_bar.reshape(-1, 1)  # for outer product calculation
 
-                # Update Lt according to equation (5): Lt+1 = Lt(I + alpha * g_bar * g_bar^T)
+                # equation (5): Lt+1 = Lt(I + alpha * g_bar * g_bar^T)
                 outer_product = g_bar_col @ g_bar_col.T
                 identity = torch.eye(n, device=grad.device, dtype=grad.dtype)
                 state["Lt"] = state["Lt"] @ (identity + alpha * outer_product)
 
-                # Update Lt_inv according to equation (7): Lt+1^-1 = (I - beta * g_bar * g_bar^T) * Lt^-1
+                # equation (7): Lt+1^-1 = (I - beta * g_bar * g_bar^T) * Lt^-1
                 state["Lt_inv"] = (identity - beta * outer_product) @ state["Lt_inv"]
 
-                # Compute preconditioned gradient according to equation (4)
+                # preconditioned gradient (equation (4))
                 precond_grad = g_bar / torch.sqrt(1 + g_bar_norm_sq)
 
-                # Update parameters
+                # Update
                 param_vector.add_(precond_grad, alpha=-group["lr"])
                 p.data = param_vector.reshape(original_shape)
 

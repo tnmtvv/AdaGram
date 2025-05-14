@@ -75,20 +75,17 @@ class FullMatrixAdaGrad(Optimizer):
                         param_vector, alpha=group["weight_decay"]
                     )
 
-                # Update G matrix with outer product of gradient
                 outer_product = grad_vector.unsqueeze(1) @ grad_vector.unsqueeze(0)
                 state["G"].add_(outer_product)
 
-                # Compute G^(1/2) - the square root of G
+                # G^(1/2) - the square root of G
                 G_inv_sqrt = self._compute_inv_matrix_sqrt(state["G"], group["eps"])
 
-                # Compute update: -lr * G^(-1/2) * gradient
+                # update: -lr * G^(-1/2) * gradient
                 update = -group["lr"] * (G_inv_sqrt @ grad_vector)
 
-                # Update parameters
                 param_vector.add_(update)
 
-                # Reshape parameters back to original shape
                 p.data = param_vector.reshape(original_shape)
 
         return loss

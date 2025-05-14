@@ -41,32 +41,30 @@ class Shampoo(Optimizer):
         )
         super(Shampoo, self).__init__(params, defaults)
 
-        # Initialize step counter
         self.steps = 0
 
     def compute_matrix_power(self, matrix, power=-0.25):
         """Compute matrix raised to a power using SVD."""
-        # Add small diagonal for numerical stability
+
         matrix = (
             matrix
-            + torch.eye(matrix.size(0), device=matrix.device, dtype=matrix.dtype) * 1e-9
+            + torch.eye(matrix.size(0), device=matrix.device, dtype=matrix.dtype)
+            * 1e-9  # for numerical stability
         )
 
         try:
-            # Perform SVD
             U, S, Vh = torch.linalg.svd(matrix, full_matrices=False)
-
-            # Ensure eigenvalues are positive
             S = torch.clamp(S, min=1e-10)
-
-            # Compute power of singular values
             S_power = torch.pow(S, power)
-
-            # Reconstruct the matrix
             return U @ torch.diag(S_power) @ Vh
-        except RuntimeError:
-            # Fallback to diagonal approximation if SVD fails
-            diag = torch.diag(matrix)
+
+        except RuntimeError as e:
+            # More informative error handling
+            print(f"SVD failed: {e}")
+            print(
+                "Warning: Using diagonal approximation which is only correct for diagonal matrices"
+            )
+            diag = torch.diagonal(matrix)
             diag_power = torch.pow(torch.clamp(diag, min=1e-10), power)
             return torch.diag(diag_power)
 
@@ -97,30 +95,23 @@ class Shampoo(Optimizer):
 
                 grad = p.grad.data
 
-                # Apply weight decay if specified
                 if weight_decay != 0:
                     grad = grad.add(p.data, alpha=weight_decay)
 
-                # Get or initialize state
                 state = self.state[p]
                 if len(state) == 0:
                     state["step"] = 0
 
-                    # Initialize momentum buffer if needed
                     if momentum > 0:
                         state["momentum_buffer"] = torch.zeros_like(grad)
 
-                # Apply momentum if specified
                 if momentum > 0:
                     state["momentum_buffer"].mul_(momentum).add_(grad)
                     grad = state["momentum_buffer"]
 
-                # Handle 2D parameters
-
                 if len(p.data.shape) == 2:
                     m, n = p.data.shape
 
-                    # Initialize preconditioners if needed
                     if "Lt" not in state:
                         state["Lt"] = eps * torch.eye(
                             m, device=grad.device, dtype=grad.dtype
@@ -129,36 +120,30 @@ class Shampoo(Optimizer):
                             n, device=grad.device, dtype=grad.dtype
                         )
 
-                    # Update preconditioners periodically
                     if self.steps % update_freq == 0:
-                        # Update left preconditioner: Lt = Lt + G_t * G_t^T
+                        # left preconditioner: Lt = Lt + G_t * G_t^T
                         state["Lt"].add_(grad @ grad.T)
 
-                        # Update right preconditioner: Rt = Rt + G_t^T * G_t
+                        # right preconditioner: Rt = Rt + G_t^T * G_t
                         state["Rt"].add_(grad.T @ grad)
 
-                    # Compute preconditioned gradient
                     left_precond = self.compute_matrix_power(state["Lt"], power=-0.25)
                     right_precond = self.compute_matrix_power(state["Rt"], power=-0.25)
 
-                    # Apply preconditioned update
                     precond_grad = left_precond @ grad @ right_precond
                     p.data.add_(precond_grad, alpha=-lr)
 
                 elif len(p.data.shape) == 1:
-                    # Initialize preconditioner if needed
                     if "diag" not in state:
                         state["diag"] = eps * torch.ones_like(p.data)
 
-                    # Update preconditioner
                     if self.steps % update_freq == 0:
                         state["diag"].add_(grad * grad)
 
-                    # Apply preconditioned update (equivalent to AdaGrad)
+                    # preconditioned update
                     precond_grad = grad / torch.sqrt(state["diag"])
                     p.data.add_(precond_grad, alpha=-lr)
 
-                # Handle non-2D parameters with diagonal approximation
                 else:
                     raise NotImplementedError(
                         "Shampoo optimizer currently only supports 2D parameters"
