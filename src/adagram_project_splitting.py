@@ -61,11 +61,14 @@ class AdaGramPS(Optimizer):
                 n = len(grad_vector)
 
                 if len(state) == 0:
-                    state["U"] = torch.zeros(n, 0, device=grad.device, dtype=grad.dtype)
-                    state["V"] = torch.zeros(n, 0, device=grad.device, dtype=grad.dtype)
+                    state["U"] = torch.zeros(n, 1, device=grad.device, dtype=grad.dtype)
+                    state["V"] = torch.zeros(n, 1, device=grad.device, dtype=grad.dtype)
                     state["Lt_inv"] = torch.eye(
                         n, device=grad.device, dtype=grad.dtype
                     ) * math.sqrt(1.0 / eps)
+                    state["Sigma"] = torch.ones(
+                        state["U"].shape[1], device=state["U"].device
+                    )
 
                 if group["weight_decay"] != 0:
                     grad_vector = grad_vector.add(
@@ -85,33 +88,13 @@ class AdaGramPS(Optimizer):
                 beta_g = (beta * grad_vector).reshape(-1, 1)
                 g_bar_col = g_bar.reshape(-1, 1)
 
-                state["U"] = torch.cat([state["U"], beta_g], dim=1)
-                state["V"] = torch.cat([state["V"], g_bar_col], dim=1)
+                if state["U"].shape[1] < max_rank:
+                    state["U"] = torch.cat([state["U"], beta_g], dim=1)
+                    state["V"] = torch.cat([state["V"], g_bar_col], dim=1)
 
-                # rank reduction if needed
-                if (
-                    max_rank is not None
-                    and min(state["U"].shape[1], state["U"].shape[1]) > max_rank
-                ):
-                    U_q, U_r = torch.linalg.qr(state["U"])
-                    V_q, V_r = torch.linalg.qr(state["V"])
-
-                    # Compute SVD of the smaller matrix U_r @ V_r.T
-                    U_svd, S, Vh = torch.linalg.svd(U_r @ V_r.T, full_matrices=False)
-
-                    # Truncate to max_rank
-                    U_svd = U_svd[:, :max_rank]
-                    S = S[:max_rank]
-                    Vh = Vh[:max_rank, :]
-
-                    # Compute the new factorized representation
-                    S_sqrt = torch.sqrt(S)
-
-                    # Update U and V with the truncated SVD
-                    state["U"] = U_q @ U_svd @ torch.diag(S_sqrt)  # ?
-                    state["V"] = V_q @ Vh.T @ torch.diag(S_sqrt)
-                    # state["U"] = self._reduce_rank(state["U"], max_rank=max_rank)
-                    # state["V"] = self._reduce_rank(state["V"], max_rank=max_rank)
+                else:
+                    state["U"] = self._reduce_rank(state["U"], max_rank)
+                    state["V"] = self._reduce_rank(state["V"], max_rank)
 
                 # Recompute Lt_inv with updated U and V
                 identity = torch.eye(n, device=grad.device, dtype=grad.dtype)
