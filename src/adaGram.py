@@ -35,7 +35,7 @@ class AdaGram(Optimizer):
     def _compute_alpha(self, g_bar_norm_sq, eps):
         """Compute alpha_t that satisfies the equation (6) in the theorem."""
         # 1 + alpha_t*||g_bar_t||^2 = (1 + ||g_bar_t||^2)^(1/2)
-        # Solving for alpha_t:
+        # for alpha_t:
         # alpha_t = ((1 + ||g_bar_t||^2)^(1/2) - 1) / ||g_bar_t||^2
         return ((1 + g_bar_norm_sq).sqrt() - 1) / (g_bar_norm_sq + eps)
 

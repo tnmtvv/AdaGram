@@ -59,7 +59,6 @@ class Shampoo(Optimizer):
             return U @ torch.diag(S_power) @ Vh
 
         except RuntimeError as e:
-            # More informative error handling
             print(f"SVD failed: {e}")
             print(
                 "Warning: Using diagonal approximation which is only correct for diagonal matrices"
@@ -79,7 +78,6 @@ class Shampoo(Optimizer):
         if closure is not None:
             loss = closure()
 
-        # Increment step counter
         self.steps += 1
 
         for group in self.param_groups:
@@ -121,10 +119,10 @@ class Shampoo(Optimizer):
                         )
 
                     if self.steps % update_freq == 0:
-                        # left preconditioner: Lt = Lt + G_t * G_t^T
+                        # left: Lt = Lt + G_t * G_t^T
                         state["Lt"].add_(grad @ grad.T)
 
-                        # right preconditioner: Rt = Rt + G_t^T * G_t
+                        # right: Rt = Rt + G_t^T * G_t
                         state["Rt"].add_(grad.T @ grad)
 
                     left_precond = self.compute_matrix_power(state["Lt"], power=-0.25)

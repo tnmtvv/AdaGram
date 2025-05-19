@@ -18,7 +18,7 @@ class AdaGramPS(Optimizer):
     def _compute_alpha(self, g_bar_norm_sq, eps):
         """Compute alpha_t that satisfies the equation (6) in the theorem."""
         # 1 + alpha_t*||g_bar_t||^2 = (1 + ||g_bar_t||^2)^(1/2)
-        # Solving for alpha_t:
+        # alpha_t:
         # alpha_t = ((1 + ||g_bar_t||^2)^(1/2) - 1) / ||g_bar_t||^2
         return ((1 + g_bar_norm_sq).sqrt() - 1) / (g_bar_norm_sq + eps)
 
@@ -96,34 +96,19 @@ class AdaGramPS(Optimizer):
                     state["U"] = self._reduce_rank(state["U"], max_rank)
                     state["V"] = self._reduce_rank(state["V"], max_rank)
 
-                # Recompute Lt_inv with updated U and V
+                # recompute Lt_inv
                 identity = torch.eye(n, device=grad.device, dtype=grad.dtype)
                 L0_inv = identity * math.sqrt(1.0 / eps)
 
-                # Only compute UV^T if we have factors
+                # compute UV^T if we have factors
                 if state["U"].shape[1] > 0:
-                    # For numerical stability, use a more stable approach
-                    # Compute UV^T explicitly only if dimensions are reasonable
-                    if n <= 10000 or state["U"].shape[1] <= 100:
-                        UV_t = state["U"] @ state["V"].t()
-                        state["Lt_inv"] = (identity - UV_t) @ L0_inv
-                    else:
-                        # For large dimensions, use a more efficient approach
-                        # that avoids forming the full UV^T matrix
-                        def lt_inv_matvec(x):
-                            return L0_inv @ x - L0_inv @ (
-                                state["U"] @ (state["V"].t() @ (L0_inv @ x))
-                            )
+                    UV_t = state["U"] @ state["V"].t()
+                    state["Lt_inv"] = (identity - UV_t) @ L0_inv
 
-                        # Apply the operator to standard basis vectors to form Lt_inv
-                        # This is more efficient for large dimensions
-                        state["Lt_inv"] = torch.stack(
-                            [lt_inv_matvec(identity[:, i]) for i in range(n)], dim=1
-                        )
                 else:
                     state["Lt_inv"] = L0_inv
 
-                # Update parameters
+                # update parameters
                 precond_grad = g_bar / torch.sqrt(1 + g_bar_norm_sq)
                 param_vector.add_(precond_grad, alpha=-group["lr"])
                 p.data = param_vector.reshape(original_shape)
