@@ -28,16 +28,29 @@ class FullMatrixAdaGrad(Optimizer):
         defaults = dict(lr=lr, eps=eps, weight_decay=weight_decay)
         super(FullMatrixAdaGrad, self).__init__(params, defaults)
 
-    def _compute_inv_matrix_sqrt(self, matrix, eps):
-        """Compute the inverse square root of a positive semi-definite matrix."""
-        eigenvalues, eigenvectors = torch.linalg.eigh(matrix)
+    def compute_matrix_power(self, matrix, power=-0.25):
+        """Compute matrix raised to a power using SVD."""
 
-        inv_sqrt_eigenvalues = 1.0 / torch.sqrt(torch.clamp(eigenvalues, min=eps))
-        inv_sqrt_matrix = (
-            eigenvectors @ torch.diag(inv_sqrt_eigenvalues) @ eigenvectors.t()
+        matrix = (
+            matrix
+            + torch.eye(matrix.size(0), device=matrix.device, dtype=matrix.dtype)
+            * 1e-9  # for numerical stability
         )
 
-        return inv_sqrt_matrix
+        try:
+            U, S, Vh = torch.linalg.svd(matrix, full_matrices=False)
+            S = torch.clamp(S, min=1e-10)
+            S_power = torch.pow(S, power)
+            return U @ torch.diag(S_power) @ Vh
+
+        except RuntimeError as e:
+            print(f"SVD failed: {e}")
+            print(
+                "Warning: Using diagonal approximation which is only correct for diagonal matrices"
+            )
+            diag = torch.diagonal(matrix)
+            diag_power = torch.pow(torch.clamp(diag, min=1e-10), power)
+            return torch.diag(diag_power)
 
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -79,7 +92,7 @@ class FullMatrixAdaGrad(Optimizer):
                 state["G"].add_(outer_product)
 
                 # G^(1/2) - the square root of G
-                G_inv_sqrt = self._compute_inv_matrix_sqrt(state["G"], group["eps"])
+                G_inv_sqrt = self.compute_matrix_power(state["G"], power=-0.5)
 
                 # update: -lr * G^(-1/2) * gradient
                 update = -group["lr"] * (G_inv_sqrt @ grad_vector)

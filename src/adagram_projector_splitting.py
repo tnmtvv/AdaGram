@@ -3,24 +3,7 @@ from torch.optim import Optimizer
 import math
 
 
-class AdaGram(Optimizer):
-    """Implements the full-matrix version of AdaGrad algorithm using recursive factorization.
-
-    This optimizer adapts the learning rate using the full matrix of outer
-    products of gradients, capturing correlations between parameters.
-
-    The implementation uses the recursive formula G_t = L_t L_t^T where L_t
-    is updated efficiently at each step without computing the full matrix inverse.
-
-    Args:
-        params (iterable): iterable of parameters to optimize
-        lr (float, optional): learning rate (default: 1.0)
-        eps (float, optional): term added to the denominator to improve
-            numerical stability (default: 1e-10)
-        weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
-        max_rank (int, optional): maximum rank to maintain for U and V matrices (default: None)
-    """
-
+class AdaGramPS(Optimizer):
     def __init__(self, params, lr=1.0, eps=1e-10, weight_decay=0, max_rank=None):
         if lr <= 0.0:
             raise ValueError(f"Invalid learning rate: {lr}")
@@ -30,12 +13,12 @@ class AdaGram(Optimizer):
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
         defaults = dict(lr=lr, eps=eps, weight_decay=weight_decay, max_rank=max_rank)
-        super(AdaGram, self).__init__(params, defaults)
+        super(AdaGramPS, self).__init__(params, defaults)
 
     def _compute_alpha(self, g_bar_norm_sq, eps):
         """Compute alpha_t that satisfies the equation (6) in the theorem."""
         # 1 + alpha_t*||g_bar_t||^2 = (1 + ||g_bar_t||^2)^(1/2)
-        # for alpha_t:
+        # alpha_t:
         # alpha_t = ((1 + ||g_bar_t||^2)^(1/2) - 1) / ||g_bar_t||^2
         return ((1 + g_bar_norm_sq).sqrt() - 1) / (g_bar_norm_sq + eps)
 
@@ -43,12 +26,19 @@ class AdaGram(Optimizer):
         """Compute beta_t as defined in the theorem."""
         return alpha / (1 + alpha * g_bar_norm_sq)
 
+    def _reduce_rank(self, M, max_rank):
+        U, S, V = torch.linalg.svd(M, full_matrices=False)
+        U = U[:, :max_rank]
+        S = S[:max_rank]
+        V = V[:max_rank, :]
+        return U @ torch.diag(S) @ V
+
     def step(self, closure=None):
         """Performs a single optimization step.
 
         Args:
             closure (callable, optional): A closure that reevaluates the model
-                and returns the loss.
+                    and returns the loss.
         """
         loss = None
         if closure is not None:
@@ -56,25 +46,29 @@ class AdaGram(Optimizer):
 
         for group in self.param_groups:
             eps = group["eps"]
+            max_rank = group.get("max_rank")
 
             for p in group["params"]:
                 if p.grad is None:
                     continue
 
                 grad = p.grad.data
-
-                # print("grad:\n", grad)
                 state = self.state[p]
 
                 original_shape = p.data.shape
                 grad_vector = grad.reshape(-1)
                 param_vector = p.data.reshape(-1)
                 n = len(grad_vector)
-                print()
 
                 if len(state) == 0:
-                    state["Lt"] = torch.eye(n, device=grad.device, dtype=grad.dtype)
-                    state["Lt_inv"] = torch.eye(n, device=grad.device, dtype=grad.dtype)
+                    state["U"] = torch.zeros(n, 1, device=grad.device, dtype=grad.dtype)
+                    state["V"] = torch.zeros(n, 1, device=grad.device, dtype=grad.dtype)
+                    state["Lt_inv"] = torch.eye(
+                        n, device=grad.device, dtype=grad.dtype
+                    ) * math.sqrt(1.0 / eps)
+                    state["Sigma"] = torch.ones(
+                        state["U"].shape[1], device=state["U"].device
+                    )
 
                 if group["weight_decay"] != 0:
                     grad_vector = grad_vector.add(
@@ -91,21 +85,31 @@ class AdaGram(Optimizer):
                 # equation (7)
                 beta = self._compute_beta(alpha, g_bar_norm_sq)
 
-                g_bar_col = g_bar.reshape(-1, 1)  # for outer product calculation
+                beta_g = (beta * grad_vector).reshape(-1, 1)
+                g_bar_col = g_bar.reshape(-1, 1)
 
-                # equation (5): Lt+1 = Lt(I + alpha * g_bar * g_bar^T)
-                outer_product = g_bar_col @ g_bar_col.T
+                if state["U"].shape[1] < max_rank:
+                    state["U"] = torch.cat([state["U"], beta_g], dim=1)
+                    state["V"] = torch.cat([state["V"], g_bar_col], dim=1)
+
+                else:
+                    state["U"] = self._reduce_rank(state["U"], max_rank)
+                    state["V"] = self._reduce_rank(state["V"], max_rank)
+
+                # recompute Lt_inv
                 identity = torch.eye(n, device=grad.device, dtype=grad.dtype)
-                state["Lt"] = state["Lt"] @ (identity + alpha * outer_product)
+                L0_inv = identity * math.sqrt(1.0 / eps)
 
-                # equation (7): Lt+1^-1 = (I - beta * g_bar * g_bar^T) * Lt^-1
-                state["Lt_inv"] = (identity - beta * outer_product) @ state["Lt_inv"]
-                print("state['Lt_inv'].shape", state["Lt_inv"].shape)
+                # compute UV^T if we have factors
+                if state["U"].shape[1] > 0:
+                    UV_t = state["U"] @ state["V"].t()
+                    state["Lt_inv"] = (identity - UV_t) @ L0_inv
 
-                # preconditioned gradient (equation (4))
+                else:
+                    state["Lt_inv"] = L0_inv
+
+                # update parameters
                 precond_grad = g_bar / torch.sqrt(1 + g_bar_norm_sq)
-
-                # Update
                 param_vector.add_(precond_grad, alpha=-group["lr"])
                 p.data = param_vector.reshape(original_shape)
 
