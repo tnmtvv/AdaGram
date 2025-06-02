@@ -26,7 +26,7 @@ class AdaGramPS(Optimizer):
         """Compute beta_t as defined in the theorem."""
         return alpha / (1 + alpha * g_bar_norm_sq)
 
-    def _reduce_rank(self, M, max_rank):
+    def proj_split(self, M, max_rank):
         U, S, V = torch.linalg.svd(M, full_matrices=False)
         U = U[:, :max_rank]
         S = S[:max_rank]
