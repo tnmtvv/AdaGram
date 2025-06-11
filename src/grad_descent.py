@@ -3,7 +3,6 @@ from torch.optim import Optimizer
 import math
 import csv
 import os
-import traceback
 
 
 class AdaGramFR(Optimizer):
@@ -33,16 +32,13 @@ class AdaGramFR(Optimizer):
     def _initialize_csv(self):
         """Initialize CSV file with headers if it doesn't exist"""
         if not os.path.isfile(self.log_file):
-            with open(self.log_file, "a", newline="") as f:
+            with open(self.log_file, "w", newline="") as f:
                 writer = csv.writer(f)
                 writer.writerow(
                     [
                         "step",
                         "param_id",
                         "grad_norm",
-                        "grad_std",
-                        "beta",
-                        "Lt_norm",
                         "lr",
                         "rank_U",
                         "rank_V",
@@ -62,8 +58,6 @@ class AdaGramFR(Optimizer):
         step_count,
         param_id,
         grad_norm,
-        grad_std,
-        beta,
         lr,
         rank_U,
         rank_V,
@@ -82,8 +76,6 @@ class AdaGramFR(Optimizer):
                     step_count,
                     param_id,
                     grad_norm.item(),
-                    grad_std.item(),
-                    beta.item(),
                     lr,
                     rank_U.item(),
                     rank_V.item(),
@@ -109,31 +101,13 @@ class AdaGramFR(Optimizer):
         """Compute beta_t as defined in the theorem."""
         return alpha / (1 + alpha * g_bar_norm_sq)
 
-    def is_orthogonal(self, U, tolerance=1e-6):
-        """Check if matrix U is orthogonal"""
-        # Compute U^T @ U
-        product = U.T @ U
-
-        # Create identity matrix of same size
-        identity = torch.eye(U.shape[1], device=U.device, dtype=U.dtype)
-
-        # Check if they're approximately equal
-        return torch.allclose(product, identity, atol=tolerance)
-
     def _reduce_rank(self, M, max_rank):
-        try:
-            U, S, Vh = torch.linalg.svd(M, full_matrices=False)
-            U_k = U[:, :max_rank]
-            S_k = S[:max_rank]
-            if not self.is_orthogonal(U_k):
-                print("cringe", self.is_orthogonal(U_k))
-            return U_k  # Shape: (rows, max_rank)
-        except Exception as e:
-            # Save problematic matrix and return error
-            print("reduce rank error: ", e)
-            print(M)
-            torch.save(M, "error_matrix.pt")
-            return None
+        U, S, Vh = torch.linalg.svd(M, full_matrices=False)
+
+        # Project original matrix onto top max_rank components
+        U_k = U[:, :max_rank]
+        S_k = S[:max_rank]
+        return U_k * S_k.unsqueeze(0)  # Shape: (rows, max_rank)
 
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -158,6 +132,12 @@ class AdaGramFR(Optimizer):
                 state = self.state[p]
 
                 original_shape = p.data.shape
+                # print("-----------")
+                # print(p.data)
+                # print("-----------")
+
+                # print("grad: ", grad)
+                # print("------")
 
                 grad_vector = grad.reshape(-1)
                 param_vector = p.data.reshape(-1)
@@ -171,26 +151,13 @@ class AdaGramFR(Optimizer):
                     ) * math.sqrt(1 / eps)
                     state["step_count"] = 0  # Initialize step counter
 
-                # if group["weight_decay"] != 0:
-                #     grad_vector = grad_vector.add(
-                #         param_vector, alpha=group["weight_decay"]
-                #     )
+                if group["weight_decay"] != 0:
+                    grad_vector = grad_vector.add(
+                        param_vector, alpha=group["weight_decay"]
+                    )
 
                 # g_bar = Lt^-1 * g (equation from theorem)
-                if len(state) == 1:
-                    g_bar = (
-                        torch.eye(n, device=grad.device, dtype=grad.dtype)
-                        * math.sqrt(1 / eps)
-                        @ grad_vector
-                    )
-                else:
-                    g_bar = (
-                        (identity - state["U"] @ state["V"].t())
-                        @ torch.eye(n, device=grad.device, dtype=grad.dtype)
-                        * math.sqrt(1 / eps)
-                        @ grad_vector
-                    )
-
+                g_bar = state["Lt_inv"] @ grad_vector
                 g_bar_norm_sq = torch.dot(g_bar, g_bar)
 
                 # equation (6)
@@ -202,7 +169,7 @@ class AdaGramFR(Optimizer):
                 beta_g = (beta * grad_vector).reshape(-1, 1)
                 g_bar_col = g_bar.reshape(-1, 1)
 
-                if len(state) == 1:
+                if len(state) == 2:
                     state["U"] = beta_g
                     state["V"] = g_bar_col
                 else:
@@ -213,65 +180,35 @@ class AdaGramFR(Optimizer):
                     state["U"] = self._reduce_rank(state["U"], max_rank)
                     state["V"] = self._reduce_rank(state["V"], max_rank)
 
-                # metrics for logging
-                try:
+                    # metrics for logging
                     rank_U = torch.linalg.matrix_rank(state["U"])
-                except Exception as e:
-                    # Save problematic matrix and return error
-                    print(f"state u, param_idx {param_idx}")
-                    print("g_bar_norm_sq", g_bar_norm_sq)
-                    print("eps", eps)
-                    print("alpha", alpha)
-                    print("beta", beta)
-                    print("grad", grad_vector)
-                    print("beta_g: (beta * grad_vector)", beta_g)
-                    print("g_bar", g_bar)
-                    print("state['Lt_inv']", state["Lt_inv"])
-                    print("error", e)
-                    print("state u: ", state["U"])
-                    print("data", p.data)
-
-                    # return
-
-                try:
                     rank_V = torch.linalg.matrix_rank(state["V"])
-                except Exception as e:
-                    # Save problematic matrix and return error
-                    print(f"state v, param_idx {param_idx}")
-                    print("g_bar_col", g_bar_col)
-                    print("beta", beta)
-                    print("error", e)
-                    print("state v: ", state["V"])
+                    max_U = state["U"].max()
+                    max_V = state["V"].max()
 
-                    print("data", p.data)
-                    print("grad", grad_vector)
-                    # return
+                    min_U = state["U"].min()
+                    min_V = state["V"].min()
 
-                max_U = state["U"].max()
-                max_V = state["V"].max()
+                    # Increment step counter
+                    state["step_count"] += 1
 
-                min_U = state["U"].min()
-                min_V = state["V"].min()
+                    self._log_to_csv(
+                        state["step_count"],
+                        param_idx,
+                        torch.sqrt(g_bar_norm_sq),
+                        group["lr"],
+                        rank_U,
+                        rank_V,
+                        max_U,
+                        min_U,
+                        max_V,
+                        min_V,
+                        state["U"].shape,
+                        state["V"].shape,
+                    )
 
-                # Increment step counter
-                state["step_count"] += 1
-
-                self._log_to_csv(
-                    state["step_count"],
-                    param_idx,
-                    torch.sqrt(torch.dot(grad_vector, grad_vector)),
-                    torch.std(grad_vector),
-                    beta,
-                    group["lr"],
-                    rank_U,
-                    rank_V,
-                    max_U,
-                    min_U,
-                    max_V,
-                    min_V,
-                    state["U"].shape,
-                    state["V"].shape,
-                )
+                UV_t = state["U"] @ state["V"].t()
+                state["Lt_inv"] = (identity - UV_t) @ state["Lt_inv"]
 
                 # G^{-1/2}_t * g_(t + 1) ???
                 precond_grad = g_bar / torch.sqrt(1 + g_bar_norm_sq)

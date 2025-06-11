@@ -63,14 +63,15 @@ class AdaGram(Optimizer):
 
                 grad = p.grad.data
 
-                # print("grad:\n", grad)
                 state = self.state[p]
 
                 original_shape = p.data.shape
                 grad_vector = grad.reshape(-1)
                 param_vector = p.data.reshape(-1)
+
+                # print("orig grad shape", grad.shape)
+                # print("grad flat:", grad_vector.shape)
                 n = len(grad_vector)
-                print()
 
                 if len(state) == 0:
                     state["Lt"] = torch.eye(n, device=grad.device, dtype=grad.dtype)
@@ -100,8 +101,6 @@ class AdaGram(Optimizer):
 
                 # equation (7): Lt+1^-1 = (I - beta * g_bar * g_bar^T) * Lt^-1
                 state["Lt_inv"] = (identity - beta * outer_product) @ state["Lt_inv"]
-                print("state['Lt_inv'].shape", state["Lt_inv"].shape)
-
                 # preconditioned gradient (equation (4))
                 precond_grad = g_bar / torch.sqrt(1 + g_bar_norm_sq)
 
