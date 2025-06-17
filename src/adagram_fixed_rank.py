@@ -177,18 +177,23 @@ class AdaGramFR(Optimizer):
                 #     )
 
                 # g_bar = Lt^-1 * g (equation from theorem)
-                if len(state) == 1:
+                if "U" not in state or "V" not in state:
                     g_bar = (
                         torch.eye(n, device=grad.device, dtype=grad.dtype)
                         * math.sqrt(1 / eps)
                         @ grad_vector
                     )
-                else:
+                elif "U" in state and "V" in state:
+
+                    # Define dimensions properly
+                    n = grad_vector.size(0)
+                    identity = torch.eye(n, device=grad.device, dtype=grad.dtype)
+
+                    # Correct matrix operations
                     g_bar = (
                         (identity - state["U"] @ state["V"].t())
-                        @ torch.eye(n, device=grad.device, dtype=grad.dtype)
-                        * math.sqrt(1 / eps)
                         @ grad_vector
+                        * math.sqrt(1 / eps)
                     )
 
                 g_bar_norm_sq = torch.dot(g_bar, g_bar)
@@ -202,7 +207,7 @@ class AdaGramFR(Optimizer):
                 beta_g = (beta * grad_vector).reshape(-1, 1)
                 g_bar_col = g_bar.reshape(-1, 1)
 
-                if len(state) == 1:
+                if "U" not in state:
                     state["U"] = beta_g
                     state["V"] = g_bar_col
                 else:
