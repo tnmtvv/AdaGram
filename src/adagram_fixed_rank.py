@@ -9,6 +9,7 @@ import traceback
 class AdaGramFR(Optimizer):
     def __init__(
         self,
+        if_svd,
         params,
         lr=1.0,
         eps=1e-10,
@@ -27,6 +28,7 @@ class AdaGramFR(Optimizer):
         super(AdaGramFR, self).__init__(params, defaults)
 
         # CSV logging setup
+        self.full_svd = if_svd
         self.log_file = log_file
         self._initialize_csv()
 
@@ -121,19 +123,93 @@ class AdaGramFR(Optimizer):
         return torch.allclose(product, identity, atol=tolerance)
 
     def _reduce_rank(self, M, max_rank):
+        """Standard SVD rank reduction"""
         try:
             U, S, Vh = torch.linalg.svd(M, full_matrices=False)
             U_k = U[:, :max_rank]
             S_k = S[:max_rank]
-            if not self.is_orthogonal(U_k):
-                print("cringe", self.is_orthogonal(U_k))
-            return U_k  # Shape: (rows, max_rank)
+            V_k = Vh[:max_rank, :]
+            return (U_k @ torch.diag(S_k) @ Vh[:max_rank, :])[
+                :, :max_rank
+            ]  # Shape: (rows, max_rank)
         except Exception as e:
-            # Save problematic matrix and return error
             print("reduce rank error: ", e)
             print(M)
             torch.save(M, "error_matrix.pt")
             return None
+
+    def reduce_rank(self, name, new_column, r, p):
+        """
+        Update rank-r SVD when a new column is appended to the original matrix using PyTorch.
+
+        Parameters:
+        - name: Name of the matrix in state
+        - new_column: New column to be appended (m,)
+        - r: Desired rank of approximation
+        - p: Parameter index
+
+        Returns:
+        - Updated U matrix stored in state[name]
+        """
+        state = self.state[p]
+        min_shape = min(state[name].shape)
+        r = min(min_shape, r)
+
+        # Initialize sigma if not exists
+        if "sigma_" + name not in state:
+            print("here")
+            _, state["sigma_" + name], _ = torch.linalg.svd(
+                state[name], full_matrices=False
+            )
+            state["sigma_" + name] = state["sigma_" + name][:r]
+
+        m = state[name].shape[0]
+
+        # Step 1: Project new column onto orthogonal complement of current U basis
+        new_column_proj = new_column - state[name] @ (state[name].T @ new_column)
+        print("new_column_proj", new_column_proj.shape)
+
+        # Step 2: Compute the norm of the residual (orthogonal component)
+        p_norm = torch.norm(new_column_proj)
+
+        # Step 3: Form the intermediate matrix K using torch operations
+        diag_sigma = torch.diag(state["sigma_" + name])
+        U_t_new_col = state[name].T @ new_column
+
+        # Create zeros row with correct dimensions
+        zeros_row = torch.zeros(
+            1,
+            len(state["sigma_" + name]),
+            device=state[name].device,
+            dtype=state[name].dtype,
+        )
+
+        print("U_t_new_col.unsqueeze(1).shape", U_t_new_col.reshape(-1, 1).shape)
+        print("diag_sigma.shape", diag_sigma.shape)
+        print(f"state[{name}]", state[name].shape)
+
+        K_top = torch.cat([diag_sigma, U_t_new_col.reshape(-1, 1)], dim=1)
+        K_bottom = torch.cat([zeros_row, p_norm.unsqueeze(0).unsqueeze(1)], dim=1)
+        K = torch.cat([K_top, K_bottom], dim=0)
+
+        # Step 4: Compute SVD of K
+        Uk, Sigma_k, _ = torch.linalg.svd(K, full_matrices=False)
+
+        # Step 5: Truncate to rank r
+        Uk_r = Uk[:, :r]
+        state["sigma_" + name] = Sigma_k[:r]
+
+        # Step 6: Update U matrix
+        if p_norm > 1e-10:
+            new_col_normalized = new_column_proj / p_norm
+        else:
+            new_col_normalized = torch.zeros(
+                m, device=state[name].device, dtype=state[name].dtype
+            )
+
+        # Concatenate and update
+        U_concat = torch.cat([state[name], new_col_normalized.reshape(-1, 1)], dim=1)
+        state[name] = U_concat @ Uk_r
 
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -204,7 +280,7 @@ class AdaGramFR(Optimizer):
                 # equation (7)
                 beta = self._compute_beta(alpha, g_bar_norm_sq)
 
-                beta_g = (beta * grad_vector).reshape(-1, 1)
+                beta_g = (beta * g_bar).reshape(-1, 1)
                 g_bar_col = g_bar.reshape(-1, 1)
 
                 if "U" not in state:
@@ -214,9 +290,18 @@ class AdaGramFR(Optimizer):
                     state["U"] = torch.cat([state["U"], beta_g], dim=1)
                     state["V"] = torch.cat([state["V"], g_bar_col], dim=1)
 
-                if max_rank is not None and state["U"].shape[1] > max_rank:
-                    state["U"] = self._reduce_rank(state["U"], max_rank)
-                    state["V"] = self._reduce_rank(state["V"], max_rank)
+                if max_rank is not None and state["U"].shape[1] == max_rank:
+                    if not self.full_svd:
+                        "not full svd"
+                        if state["U"].shape[0] >= max_rank:
+                            self.reduce_rank("U", beta_g, max_rank, p)
+                            self.reduce_rank("V", g_bar_col, max_rank, p)
+                        else:
+                            self._reduce_rank(state["U"], state["U"].shape[0])
+                            self._reduce_rank(state["V"], state["U"].shape[0])
+                    else:
+                        state["U"] = self._reduce_rank(M=state["U"], max_rank=max_rank)
+                        state["V"] = self._reduce_rank(M=state["V"], max_rank=max_rank)
 
                 # metrics for logging
                 try:
