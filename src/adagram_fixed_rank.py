@@ -15,7 +15,7 @@ class AdaGramFR(Optimizer):
         eps=1e-10,
         weight_decay=0,
         max_rank=None,
-        log_file="adagram_logs.csv",
+        log_file=f"results/adagram_logs.csv",
     ):
         if lr <= 0.0:
             raise ValueError(f"Invalid learning rate: {lr}")
@@ -29,8 +29,13 @@ class AdaGramFR(Optimizer):
 
         # CSV logging setup
         self.full_svd = if_svd
-        self.log_file = log_file
+        if self.full_svd:
+            self.log_file = f"results/loggs/svd_adagram_logs.csv"
+        else:
+            self.log_file = f"results/loggs/nosvd_adagram_logs.csv"
+
         self._initialize_csv()
+        self.if_first = True
 
     def _initialize_csv(self):
         """Initialize CSV file with headers if it doesn't exist"""
@@ -44,7 +49,6 @@ class AdaGramFR(Optimizer):
                         "grad_norm",
                         "grad_std",
                         "beta",
-                        "Lt_norm",
                         "lr",
                         "rank_U",
                         "rank_V",
@@ -122,94 +126,145 @@ class AdaGramFR(Optimizer):
         # Check if they're approximately equal
         return torch.allclose(product, identity, atol=tolerance)
 
-    def _reduce_rank(self, M, max_rank):
+    def reduce_rank_psi(self, delta_A, U_0, S_0, V_0):
         """Standard SVD rank reduction"""
-        try:
-            U, S, Vh = torch.linalg.svd(M, full_matrices=False)
-            U_k = U[:, :max_rank]
-            S_k = S[:max_rank]
-            V_k = Vh[:max_rank, :]
-            return (U_k @ torch.diag(S_k) @ Vh[:max_rank, :])[
-                :, :max_rank
-            ]  # Shape: (rows, max_rank)
-        except Exception as e:
-            print("reduce rank error: ", e)
-            print(M)
-            torch.save(M, "error_matrix.pt")
-            return None
+        K_cur = U_0 @ S_0 + delta_A @ V_0
+        U_cur, S_hat = torch.linalg.qr(K_cur)
+        S_tild = S_hat - U_cur.T @ delta_A @ V_0
+        L_cur = V_0 @ S_tild.T + delta_A.T @ U_cur
+        V_cur, S_cur_T = torch.linalg.qr(L_cur)
+        return U_cur, S_cur_T.T, V_cur
 
-    def reduce_rank(self, name, new_column, r, p):
+    def reduce_rank_svd(self, M, max_rank):
+
+        U, S, Vh = torch.linalg.svd(M, full_matrices=False)
+        U_k = U[:, :max_rank]
+        S_k = S[:max_rank]
+        V_k = Vh[:max_rank, :]
+        return U_k, S_k, V_k  # Shape: (rows, max_rank)
+
+    def reduce_rank_brand_matrix(self, matrix, new_column, rank):
         """
-        Update rank-r SVD when a new column is appended to the original matrix using PyTorch.
+        Update rank-r SVD when a new column is appended to the original matrix.
 
         Parameters:
-        - name: Name of the matrix in state
+        - matrix: Original matrix (m x n)
         - new_column: New column to be appended (m,)
-        - r: Desired rank of approximation
-        - p: Parameter index
+        - rank: Desired rank of approximation
 
         Returns:
-        - Updated U matrix stored in state[name]
+        - U: Updated U matrix (m x r)
+        - S: Updated singular values matrix (r x r)
+        - V: Updated V matrix (n+1 x r)
         """
-        state = self.state[p]
-        min_shape = min(state[name].shape)
-        r = min(min_shape, r)
+        m, n = matrix.shape
+        r = min(min(matrix.shape), rank)
 
-        # Initialize sigma if not exists
-        if "sigma_" + name not in state:
-            print("here")
-            _, state["sigma_" + name], _ = torch.linalg.svd(
-                state[name], full_matrices=False
-            )
-            state["sigma_" + name] = state["sigma_" + name][:r]
+        # Compute SVD of original matrix
+        U, S_vals, Vh = torch.linalg.svd(matrix, full_matrices=False)
+        S = torch.diag(S_vals)
 
-        m = state[name].shape[0]
-
-        # Step 1: Project new column onto orthogonal complement of current U basis
-        new_column_proj = new_column - state[name] @ (state[name].T @ new_column)
-        print("new_column_proj", new_column_proj.shape)
-
-        # Step 2: Compute the norm of the residual (orthogonal component)
+        # Project new column onto U
+        U_t_new_col = U.T @ new_column
+        new_column_proj = new_column - U @ U_t_new_col
         p_norm = torch.norm(new_column_proj)
 
-        # Step 3: Form the intermediate matrix K using torch operations
-        diag_sigma = torch.diag(state["sigma_" + name])
-        U_t_new_col = state[name].T @ new_column
-
-        # Create zeros row with correct dimensions
-        zeros_row = torch.zeros(
-            1,
-            len(state["sigma_" + name]),
-            device=state[name].device,
-            dtype=state[name].dtype,
-        )
-
-        print("U_t_new_col.unsqueeze(1).shape", U_t_new_col.reshape(-1, 1).shape)
-        print("diag_sigma.shape", diag_sigma.shape)
-        print(f"state[{name}]", state[name].shape)
-
-        K_top = torch.cat([diag_sigma, U_t_new_col.reshape(-1, 1)], dim=1)
+        # Construct K matrix
+        zeros_row = torch.zeros(1, S.shape[0], device=matrix.device, dtype=matrix.dtype)
+        K_top = torch.cat([S, U_t_new_col.reshape(-1, 1)], dim=1)
         K_bottom = torch.cat([zeros_row, p_norm.unsqueeze(0).unsqueeze(1)], dim=1)
         K = torch.cat([K_top, K_bottom], dim=0)
+        print("K", K.shape)
 
-        # Step 4: Compute SVD of K
-        Uk, Sigma_k, _ = torch.linalg.svd(K, full_matrices=False)
-
-        # Step 5: Truncate to rank r
+        # SVD of K
+        Uk, Sigma_k_vals, Vk_t = torch.linalg.svd(K, full_matrices=False)
+        Sigma_k = torch.diag(Sigma_k_vals[:r])
         Uk_r = Uk[:, :r]
-        state["sigma_" + name] = Sigma_k[:r]
+        Vk_r = Vk_t[:r, :].T
 
-        # Step 6: Update U matrix
-        if p_norm > 1e-10:
+        # Normalize new column projection
+        if p_norm > 1e-5:
             new_col_normalized = new_column_proj / p_norm
         else:
             new_col_normalized = torch.zeros(
-                m, device=state[name].device, dtype=state[name].dtype
+                m, device=matrix.device, dtype=matrix.dtype
             )
 
-        # Concatenate and update
-        U_concat = torch.cat([state[name], new_col_normalized.reshape(-1, 1)], dim=1)
-        state[name] = U_concat @ Uk_r
+        # Update U and V
+        U_concat = torch.cat([U, new_col_normalized.reshape(-1, 1)], dim=1)
+        U_new = U_concat @ Uk_r
+
+        V_concat = torch.cat(
+            [Vh.T, torch.zeros(n, 1, device=matrix.device, dtype=matrix.dtype)], dim=1
+        )
+        last_row = torch.zeros(1, n + 1, device=matrix.device, dtype=matrix.dtype)
+        last_row[0, -1] = 1
+        V_concat = torch.cat([V_concat, last_row], dim=0)
+        V_new = V_concat @ Vk_r
+
+        return U_new, Sigma_k, V_new
+
+    def reduce_rank_brand_usv(self, U, S, V, new_column, rank):
+        """
+        Update rank-r SVD when a new column is appended to the original matrix.
+
+        Parameters:
+        - matrix: Original matrix (m x n)
+        - new_column: New column to be appended (m,)
+        - rank: Desired rank of approximation
+
+        Returns:
+        - U: Updated U matrix (m x r)
+        - S: Updated singular values matrix (r x r)
+        - V: Updated V matrix (n+1 x r)
+        """
+        m = U.shape[0]
+        n = V.shape[1]
+
+        print("m", m)
+        print("n", n)
+        # r = min(min(matrix.shape), rank)
+
+        # # Compute SVD of original matrix
+        # U, S_vals, Vh = torch.linalg.svd(matrix, full_matrices=False)
+        # S = torch.diag(S_vals)
+
+        # Project new column onto U
+        U_t_new_col = U.T @ new_column
+        new_column_proj = new_column - U @ U_t_new_col
+        p_norm = torch.norm(new_column_proj)
+
+        # Construct K matrix
+        zeros_row = torch.zeros(1, S.shape[0], device=U.device, dtype=U.dtype)
+        K_top = torch.cat([S, U_t_new_col.reshape(-1, 1)], dim=1)
+        K_bottom = torch.cat([zeros_row, p_norm.unsqueeze(0).unsqueeze(1)], dim=1)
+        K = torch.cat([K_top, K_bottom], dim=0)
+
+        # SVD of K
+        Uk, Sigma_k_vals, Vk_t = torch.linalg.svd(K, full_matrices=False)
+        Sigma_k = torch.diag(Sigma_k_vals[:rank])
+        Uk_r = Uk[:, :rank]
+        Vk_r = Vk_t[:rank, :].T
+
+        # Normalize new column projection
+        if p_norm > 1e-5:
+            new_col_normalized = new_column_proj / p_norm
+        else:
+            new_col_normalized = torch.zeros(m, device=U.device, dtype=U.dtype)
+
+        # Update U and V
+        U_concat = torch.cat([U, new_col_normalized.reshape(-1, 1)], dim=1)
+        U_new = U_concat @ Uk_r
+
+        V_concat = torch.cat(
+            [V.T, torch.zeros(n, 1, device=V.device, dtype=U.dtype)], dim=1
+        )
+        last_row = torch.zeros(1, n + 1, device=U.device, dtype=U.dtype)
+        last_row[0, -1] = 1
+        V_concat = torch.cat([V_concat, last_row], dim=0)
+        V_new = V_concat @ Vk_r
+
+        return U_new, Sigma_k, V_new
 
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -223,6 +278,7 @@ class AdaGramFR(Optimizer):
             loss = closure()
 
         for group in self.param_groups:
+
             eps = group["eps"]
             max_rank = group.get("max_rank")
 
@@ -230,6 +286,7 @@ class AdaGramFR(Optimizer):
                 if p.grad is None:
                     continue
 
+                # print("p.grad.data.shape", p.grad.data.shape)
                 grad = p.grad.data
                 state = self.state[p]
 
@@ -238,6 +295,7 @@ class AdaGramFR(Optimizer):
                 grad_vector = grad.reshape(-1)
                 param_vector = p.data.reshape(-1)
                 n = len(grad_vector)
+                # print(param_vector)
 
                 identity = torch.eye(n, device=grad.device, dtype=grad.dtype)
 
@@ -245,6 +303,9 @@ class AdaGramFR(Optimizer):
                     state["Lt_inv"] = torch.eye(
                         n, device=grad.device, dtype=grad.dtype
                     ) * math.sqrt(1 / eps)
+                    state["S"] = torch.eye(
+                        max_rank, device=grad.device, dtype=grad.dtype
+                    )
                     state["step_count"] = 0  # Initialize step counter
 
                 # if group["weight_decay"] != 0:
@@ -253,21 +314,21 @@ class AdaGramFR(Optimizer):
                 #     )
 
                 # g_bar = Lt^-1 * g (equation from theorem)
-                if "U" not in state or "V" not in state:
+                if "P" not in state or "Q" not in state:
                     g_bar = (
                         torch.eye(n, device=grad.device, dtype=grad.dtype)
                         * math.sqrt(1 / eps)
                         @ grad_vector
                     )
-                elif "U" in state and "V" in state:
+                elif "P" in state and "Q" in state:
 
-                    # Define dimensions properly
+                    # Define dimensions properlys
                     n = grad_vector.size(0)
                     identity = torch.eye(n, device=grad.device, dtype=grad.dtype)
 
                     # Correct matrix operations
                     g_bar = (
-                        (identity - state["U"] @ state["V"].t())
+                        (identity - state["P"] @ state["Q"].T)
                         @ grad_vector
                         * math.sqrt(1 / eps)
                     )
@@ -283,65 +344,75 @@ class AdaGramFR(Optimizer):
                 beta_g = (beta * g_bar).reshape(-1, 1)
                 g_bar_col = g_bar.reshape(-1, 1)
 
-                if "U" not in state:
-                    state["U"] = beta_g
-                    state["V"] = g_bar_col
+                if "P" not in state:
+                    # print("'U' not in state")
+                    state["P"] = beta_g
+                    state["Q"] = g_bar_col
+
                 else:
-                    state["U"] = torch.cat([state["U"], beta_g], dim=1)
-                    state["V"] = torch.cat([state["V"], g_bar_col], dim=1)
+                    if max_rank is not None and state["P"].shape[1] >= max_rank:
+                        if not self.full_svd:
+                            # state["U"], state["S"], state["V"] = (
+                            #     self.reduce_rank_brand_usv(
+                            #         U,
+                            #         state["S"],
+                            #         V,
+                            #         grad_vector,
+                            #         rank=max_rank,
+                            #     )
+                            # )
+                            Q_u, R_u = torch.linalg.qr(state["P"])
+                            Q_v, R_v = torch.linalg.qr(state["Q"])
 
-                if max_rank is not None and state["U"].shape[1] == max_rank:
-                    if not self.full_svd:
-                        "not full svd"
-                        if state["U"].shape[0] >= max_rank:
-                            self.reduce_rank("U", beta_g, max_rank, p)
-                            self.reduce_rank("V", g_bar_col, max_rank, p)
+                            matrix = R_u @ R_v.T
+
+                            u, sigm, v = torch.linalg.svd(matrix, full_matrices=False)
+                            uk = u[:, :max_rank]
+                            sigm = torch.diag(sigm[:max_rank])
+                            vk = v[:max_rank, :]
+
+                            state["P"] = Q_u @ uk @ sigm
+                            state["Q"] = Q_v @ vk
+
+                            # print("U", state["U"].shape)
+                            # print("S", state["S"].shape)
+                            # print("V", state["V"].shape)
+
                         else:
-                            self._reduce_rank(state["U"], state["U"].shape[0])
-                            self._reduce_rank(state["V"], state["U"].shape[0])
+                            state["P"] = torch.cat([state["P"], beta_g], dim=1)
+                            state["Q"] = torch.cat([state["Q"], g_bar_col], dim=1)
+
+                            U, S, V = self.reduce_rank_svd(
+                                state["P"] @ state["Q"].T, max_rank=max_rank
+                            )
+                            state["P"] = U @ torch.diag(S)
+                            state["Q"] = V.T
+                            # print("P", state["P"].shape)
+
+                    elif state["P"].shape[1] < max_rank:
+                        state["P"] = torch.concat([state["P"], beta_g], dim=1)
+                        state["Q"] = torch.concat([state["Q"], g_bar_col], dim=1)
+
+                if "P" in state and "Q" in state:
+                    shape_P = state["P"].shape
+                    # shape_Q = state["Q"].shape
+
+                    if shape_P == 2:
+                        rank_U = torch.linalg.matrix_rank(state["P"])
+                        rank_V = torch.linalg.matrix_rank(state["Q"])
+
+                        max_U = state["P"].max()
+                        max_V = state["Q"].max()
+
+                        min_U = state["P"].min()
+                        min_V = state["Q"].min()
+
                     else:
-                        state["U"] = self._reduce_rank(M=state["U"], max_rank=max_rank)
-                        state["V"] = self._reduce_rank(M=state["V"], max_rank=max_rank)
-
-                # metrics for logging
-                try:
-                    rank_U = torch.linalg.matrix_rank(state["U"])
-                except Exception as e:
-                    # Save problematic matrix and return error
-                    print(f"state u, param_idx {param_idx}")
-                    print("g_bar_norm_sq", g_bar_norm_sq)
-                    print("eps", eps)
-                    print("alpha", alpha)
-                    print("beta", beta)
-                    print("grad", grad_vector)
-                    print("beta_g: (beta * grad_vector)", beta_g)
-                    print("g_bar", g_bar)
-                    print("state['Lt_inv']", state["Lt_inv"])
-                    print("error", e)
-                    print("state u: ", state["U"])
-                    print("data", p.data)
-
-                    # return
-
-                try:
-                    rank_V = torch.linalg.matrix_rank(state["V"])
-                except Exception as e:
-                    # Save problematic matrix and return error
-                    print(f"state v, param_idx {param_idx}")
-                    print("g_bar_col", g_bar_col)
-                    print("beta", beta)
-                    print("error", e)
-                    print("state v: ", state["V"])
-
-                    print("data", p.data)
-                    print("grad", grad_vector)
-                    # return
-
-                max_U = state["U"].max()
-                max_V = state["V"].max()
-
-                min_U = state["U"].min()
-                min_V = state["V"].min()
+                        rank_U = rank_V = max_U = max_V = min_U = min_V = torch.tensor(
+                            0
+                        )
+                else:
+                    rank_U = rank_V = max_U = max_V = min_U = min_V = torch.tensor(0)
 
                 # Increment step counter
                 state["step_count"] += 1
@@ -359,15 +430,12 @@ class AdaGramFR(Optimizer):
                     min_U,
                     max_V,
                     min_V,
-                    state["U"].shape,
-                    state["V"].shape,
+                    state["P"].shape,
+                    state["Q"].shape,
                 )
 
-                # G^{-1/2}_t * g_(t + 1) ???
                 precond_grad = g_bar / torch.sqrt(1 + g_bar_norm_sq)
 
-                # print("update: ", -group["lr"] * precond_grad)
-                # print("-----------------")
                 param_vector.add_(precond_grad, alpha=-group["lr"])
                 p.data = param_vector.reshape(original_shape)
 
