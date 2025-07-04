@@ -66,7 +66,7 @@ class SparseDataset(Dataset):
             + 1.5 * X[:, 1]  # Sparse feature 2 (medium weight)
             + 0.3
             * X[:, 2 : min(5, self.in_dim)].sum(dim=1)  # Dense features (low weight)
-            + torch.randn(self.n_samples) * self.noise
+            # + torch.randn(self.n_samples) * self.noise
         )  # Noise
 
         # Convert to binary classification
