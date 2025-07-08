@@ -6,15 +6,13 @@ import os
 import traceback
 
 
-class AdaGramFR(Optimizer):
+class FullAdaGrad(Optimizer):
     def __init__(
         self,
-        if_svd,
         params,
         lr=1.0,
         eps=1e-10,
         weight_decay=0,
-        max_rank=None,
         log_file=f"results/adagram_logs.csv",
     ):
         if lr <= 0.0:
@@ -24,19 +22,19 @@ class AdaGramFR(Optimizer):
         if weight_decay < 0.0:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
-        defaults = dict(lr=lr, eps=eps, weight_decay=weight_decay, max_rank=max_rank)
-        super(AdaGramFR, self).__init__(params, defaults)
+        defaults = dict(lr=lr, eps=eps, weight_decay=weight_decay)
+        super(FullAdaGrad, self).__init__(params, defaults)
 
         # CSV logging setup
-        self.full_svd = if_svd
-        if self.full_svd:
-            self.log_file = f"results/loggs/svd_adagram_logs_{max_rank}.csv"
-        else:
-            self.log_file = f"results/loggs/nosvd_adagram_logs_{max_rank}.csv"
+        # if self.full_svd:
+        #     self.log_file = f"results/loggs/svd_adagram_logs.csv"
+        # else:
+        #     self.log_file = f"results/loggs/nosvd_adagram_logs.csv"
+
+        self.log_file = f"results/loggs/adagram_vanila.csv"
 
         self._initialize_csv()
         self.if_first = True
-        self.max_rank = max_rank
 
     def _initialize_csv(self):
         """Initialize CSV file with headers if it doesn't exist"""
@@ -52,7 +50,7 @@ class AdaGramFR(Optimizer):
                         "beta",
                         "lr",
                         "error_norm",
-                        "error_svd",
+                        "error_norm",
                         "rank_U",
                         "rank_V",
                         "max_U",
@@ -75,7 +73,6 @@ class AdaGramFR(Optimizer):
         beta,
         lr,
         error_norm,
-        error_svd,
         rank_U,
         rank_V,
         max_U,
@@ -97,7 +94,6 @@ class AdaGramFR(Optimizer):
                     beta.item(),
                     lr,
                     error_norm.item(),
-                    error_svd.item(),
                     rank_U.item(),
                     rank_V.item(),
                     max_U.item(),
@@ -145,11 +141,10 @@ class AdaGramFR(Optimizer):
     def reduce_rank_svd(self, M, max_rank):
 
         U, S, Vh = torch.linalg.svd(M, full_matrices=False)
-        # U_k = U[:, :max_rank]
-        # S_k = S[:max_rank]
-        # V_k = Vh[:max_rank, :]
-        # return U_k, S_k, V_k  # Shape: (rows, max_rank)
-        return U, S, Vh
+        U_k = U[:, :max_rank]
+        S_k = S[:max_rank]
+        V_k = Vh[:max_rank, :]
+        return U_k, S_k, V_k  # Shape: (rows, max_rank)
 
     def reduce_rank_brand_matrix(self, matrix, new_column, rank):
         """
@@ -287,7 +282,6 @@ class AdaGramFR(Optimizer):
             for param_idx, p in enumerate(group["params"]):
                 if p.grad is None:
                     continue
-                reconstruct_error = torch.tensor(5)
 
                 # print("p.grad.data.shape", p.grad.data.shape)
                 grad = p.grad.data
@@ -304,182 +298,20 @@ class AdaGramFR(Optimizer):
                 identity = torch.eye(n, device=grad.device, dtype=grad.dtype)
 
                 if len(state) == 0:
-                    if not max_rank:
-                        max_rank = n
-                    state["S"] = torch.eye(
-                        max_rank, device=grad.device, dtype=grad.dtype
-                    )
-
+                    # state["S"] = torch.eye(
+                    #     max_rank, device=grad.device, dtype=grad.dtype
+                    # )
                     state["G"] = torch.eye(n, device=grad.device, dtype=grad.dtype)
                     state["step_count"] = 0  # Initialize step counter
 
-                if "P" not in state or "Q" not in state:
-                    g_bar = (
-                        torch.eye(n, device=grad.device, dtype=grad.dtype) @ grad_vector
-                    )
-                elif "P" in state and "Q" in state:
-
-                    n = grad_vector.size(0)
-                    identity = torch.eye(n, device=grad.device, dtype=grad.dtype)
-
-                    g_bar = (identity - state["P"] @ state["Q"].T) @ grad_vector
-
-                g_bar_norm_sq = torch.dot(g_bar, g_bar)
-
-                # equation (6)
-                alpha = self._compute_alpha(g_bar_norm_sq, eps)
-
-                # equation (7)
-                beta = self._compute_beta(alpha, g_bar_norm_sq)
-
-                beta_g = (beta * g_bar).reshape(-1, 1)
-                g_bar_col = g_bar.reshape(-1, 1)
-
                 state["G"] += torch.ger(grad_vector, grad_vector)
 
-                if "P" not in state:
-                    state["P"] = beta_g
-                    state["Q"] = g_bar_col
+                eigenvals, eigenvecs = torch.linalg.eigh(state["G"])
+                sqrt_eigenvals = torch.sqrt(eigenvals)
+                sqr_G = eigenvecs @ torch.diag(sqrt_eigenvals) @ eigenvecs.T
 
-                    state["L_t"] = identity + alpha * torch.ger(g_bar, g_bar)
-                    result = state["L_t"] @ state["L_t"].T
-                    target = state["G"]
-                    error_norm = torch.norm(torch.abs(target - result)) / torch.norm(
-                        target
-                    )
-                    reconstruct_error = torch.tensor(0)
-                else:
-                    L_t_inv = identity - state["P"] @ state["Q"].T
-                    L_t = torch.linalg.inv(L_t_inv) @ (
-                        identity + alpha * torch.ger(g_bar, g_bar)
-                    )
-                    result = L_t @ L_t.T
-                    target = state["G"]
-                    if not torch.allclose(result, target, atol=1e-3):
-                        print("False")
-                    else:
-                        print("TRUE!!!")
-                    identity = torch.eye(
-                        state["Q"].shape[0], device=g_bar.device, dtype=g_bar.dtype
-                    )
-                    print("torch.norm(target)", torch.norm(target))
-                    error_norm = torch.norm(torch.abs(target - result)) / torch.norm(
-                        target
-                    )
-
-                    if max_rank is not None and state["P"].shape[1] >= max_rank:
-                        if not self.full_svd:
-                            identity = torch.eye(
-                                state["Q"].shape[0],
-                                device=g_bar.device,
-                                dtype=g_bar.dtype,
-                            )
-                            v_upd = (
-                                (identity - state["Q"] @ state["P"].T) @ g_bar
-                            ).reshape(-1, 1)
-                            state["P"] = torch.cat([state["P"], beta_g], dim=1)
-                            state["Q"] = torch.cat([state["Q"], v_upd], dim=1)
-
-                            rec_target = state["P"] @ state["Q"].T
-
-                            Q_u, R_u = torch.linalg.qr(state["P"])
-                            Q_v, R_v = torch.linalg.qr(state["Q"])
-
-                            matrix = R_u @ R_v.T
-
-                            u, sigm, v = torch.linalg.svd(matrix, full_matrices=False)
-                            # uk = u[:, :max_rank]
-                            # sigm = torch.diag(sigm[:max_rank])
-                            # vk = v[:max_rank, :]
-                            uk = u
-                            sigm = torch.diag(sigm)
-                            vk = v
-
-                            state["P"] = Q_u @ uk @ sigm
-                            state["Q"] = Q_v @ vk.T
-
-                            reconstruct_error = torch.norm(
-                                torch.abs(rec_target - state["P"] @ state["Q"].T)
-                            ) / torch.norm(rec_target)
-
-                        else:
-
-                            identity = torch.eye(
-                                state["Q"].shape[0],
-                                device=g_bar.device,
-                                dtype=g_bar.dtype,
-                            )
-                            v_upd = (
-                                (identity - state["Q"] @ state["P"].T) @ g_bar
-                            ).reshape(-1, 1)
-                            state["P"] = torch.cat([state["P"], beta_g], dim=1)
-                            state["Q"] = torch.cat([state["Q"], v_upd], dim=1)
-
-                            rec_target = state["P"] @ state["Q"].T
-
-                            U, S, V = self.reduce_rank_svd(
-                                state["P"] @ state["Q"].T, max_rank=max_rank
-                            )
-                            state["P"] = U @ torch.diag(S)
-                            state["Q"] = V.T
-
-                            reconstruct_error = torch.norm(
-                                torch.abs(rec_target - U @ torch.diag(S) @ V)
-                            ) / torch.norm(rec_target)
-
-                    elif state["P"].shape[1] < max_rank:
-
-                        identity = torch.eye(
-                            state["Q"].shape[0], device=g_bar.device, dtype=g_bar.dtype
-                        )
-                        v_upd = (
-                            (identity - state["Q"] @ state["P"].T) @ g_bar
-                        ).reshape(-1, 1)
-                        state["P"] = torch.concat([state["P"], beta_g], dim=1)
-                        state["Q"] = torch.concat([state["Q"], v_upd], dim=1)
-                        reconstruct_error = torch.tensor(0)
-
-                if "P" in state and "Q" in state:
-
-                    rank_U = torch.linalg.matrix_rank(state["P"])
-                    rank_V = torch.linalg.matrix_rank(state["Q"])
-
-                    max_U = state["P"].max()
-                    max_V = state["Q"].max()
-
-                    min_U = state["P"].min()
-                    min_V = state["Q"].min()
-
-                else:
-                    rank_U = rank_V = max_U = max_V = min_U = min_V = torch.tensor(0)
-
-                # Increment step counter
-                state["step_count"] += 1
-
-                # print("second error_norm", error_norm)
-                # if not reconstruct_error:
-                #     reconstruct_error = torch.tensor(0)
-
-                self._log_to_csv(
-                    state["step_count"],
-                    param_idx,
-                    torch.sqrt(torch.dot(grad_vector, grad_vector)),
-                    torch.std(grad_vector),
-                    beta,
-                    group["lr"],
-                    error_norm,
-                    reconstruct_error,
-                    rank_U,
-                    rank_V,
-                    max_U,
-                    min_U,
-                    max_V,
-                    min_V,
-                    state["P"].shape,
-                    state["Q"].shape,
-                )
-
-                precond_grad = g_bar / torch.sqrt(1 + g_bar_norm_sq)
+                # sqr_G = torch.linalg.matrix_power(state["G"], 0.5)
+                precond_grad = torch.linalg.inv(sqr_G) @ grad_vector
 
                 param_vector.add_(precond_grad, alpha=-group["lr"])
                 p.data = param_vector.reshape(original_shape)

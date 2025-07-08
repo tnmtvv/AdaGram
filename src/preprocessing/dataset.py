@@ -29,10 +29,12 @@ class SparseDataset(Dataset):
         noise=0.1,
         sparsity_rate_1=0.05,
         sparsity_rate_2=0.15,
+        seed=42,
     ):
         super().__init__(n_samples, in_dim, out_dim, noise)
         self.sparsity_rate_1 = sparsity_rate_1
         self.sparsity_rate_2 = sparsity_rate_2
+        self.seed = seed
 
     def create_data(self):
         """
@@ -42,6 +44,9 @@ class SparseDataset(Dataset):
         Returns:
             tuple: (X, y) where X is sparse input data and y is binary target
         """
+
+        if self.seed:
+            torch.manual_seed(self.seed)
         X = torch.zeros(self.n_samples, self.in_dim)
 
         # Feature 1: Very sparse but highly predictive

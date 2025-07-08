@@ -44,6 +44,7 @@ class AdaGramPS(Optimizer):
                         "grad_std",
                         "beta",
                         "lr",
+                        "error_norm",
                         "rank_U",
                         "rank_V",
                         "max_U",
@@ -65,6 +66,7 @@ class AdaGramPS(Optimizer):
         grad_std,
         beta,
         lr,
+        error_norm,
         rank_U,
         rank_V,
         max_U,
@@ -85,6 +87,7 @@ class AdaGramPS(Optimizer):
                     grad_std.item(),
                     beta.item(),
                     lr,
+                    error_norm.item(),
                     rank_U.item(),
                     rank_V.item(),
                     max_U.item(),
@@ -156,6 +159,7 @@ class AdaGramPS(Optimizer):
                     # state["G_0"] = torch.eye(
                     #     n, device=grad.device, dtype=grad.dtype
                     # ) * math.sqrt(eps)
+                    state["G"] = torch.eye(n, device=grad.device, dtype=grad.dtype)
 
                     g_bar = (
                         torch.eye(n, device=grad.device, dtype=grad.dtype)
@@ -181,6 +185,8 @@ class AdaGramPS(Optimizer):
                 beta_g = (beta * g_bar).reshape(-1, 1)
                 g_bar_col = g_bar.reshape(-1, 1)
 
+                state["G"] += torch.ger(grad_vector, grad_vector)
+
                 if "P" in state:
                     update = (
                         beta
@@ -195,9 +201,26 @@ class AdaGramPS(Optimizer):
                     )
 
                 if "P" not in state:
+                    # print("here")
                     # print("'U' not in state")
                     state["P"] = beta_g
                     state["Q"] = g_bar_col
+
+                    state["L_t"] = identity + alpha * torch.ger(g_bar, g_bar)
+                    result = state["L_t"] @ state["L_t"].T
+                    target = state["G"]
+                    if not torch.allclose(result, target, atol=1e-3):
+                        print("the first one")
+                        # print("False")
+                        # print("L_t @ L_t.T:\n", result)
+                        # print("state['G']:\n", target)
+                    else:
+                        print("the first one")
+                        # print("TRUE!!!")
+                        # print("state['G']:\n", target)
+                    error_norm = torch.norm(torch.abs(target - result)) / torch.norm(
+                        target
+                    )
 
                 elif max_rank is not None and state["P"].shape[1] < max_rank:
                     identity = torch.eye(
@@ -209,20 +232,56 @@ class AdaGramPS(Optimizer):
                     state["P"] = torch.concat([state["P"], beta_g], dim=1)
                     state["Q"] = torch.concat([state["Q"], v_upd], dim=1)
 
+                    identity = torch.eye(n, device=grad.device, dtype=grad.dtype)
+
+                    state["L_t"] = state["L_t"] @ (
+                        identity + alpha * torch.ger(g_bar, g_bar)
+                    )
+                    result = state["L_t"] @ state["L_t"].T
+                    target = state["G"]
+                    error_norm = torch.norm(torch.abs(target - result)) / torch.norm(
+                        target
+                    )
+                    # print("norm target", torch.norm(target))
+
                 elif max_rank is not None and state["P"].shape[1] >= max_rank:
                     if "U" not in state:
                         state["U"], state["S"], state["V"] = torch.linalg.svd(
                             state["P"] @ state["Q"].T
                         )
-                    U, S, V = self.reduce_rank_psi(
-                        update, state["U"], state["S"], state["V"]
-                    )
-                    Q_1, S, Q_2 = torch.linalg.svd(S)
+                        # state["S"] = torch.diag(state["S"][: self.max_rank])
+                        # state["U"] = state["U"][:, : self.max_rank]
+                        # state["V"] = state["V"][: self.max_rank, :].T
+                        state["S"] = torch.diag(state["S"])
+                        state["U"] = state["U"]
+                        state["V"] = state["V"].T
+
+                    else:
+                        state["U"], state["S"], state["V"] = self.reduce_rank_psi(
+                            update, state["U"], state["S"], state["V"]
+                        )
+                        # state["V"] = state["V"].T
+                    # Q_1, S, Q_2 = torch.linalg.svd(state["S"])
                     # Uk = U[:, : self.max_rank]
-                    Sk = S[: self.max_rank]
+                    # Sk = S
                     # Vk = V[: self.max_rank, :]
-                    state["P"] = U @ Q_1[:, : self.max_rank] @ torch.diag(Sk)
-                    state["Q"] = (Q_2[: self.max_rank, :] @ V).T
+                    state["P"] = state["U"] @ state["S"]
+                    state["Q"] = state["V"]
+
+                    identity = torch.eye(n, device=grad.device, dtype=grad.dtype)
+                    # L_t_inv = identity - state["P"] @ state["Q"].T
+                    # L_t_p_inv = (identity - beta * torch.ger(g_bar, g_bar)) @ L_t_inv
+                    # print("det", torch.linalg.det(L_t_p_inv))
+                    state["L_t"] = state["L_t"] @ (
+                        identity + alpha * torch.ger(g_bar, g_bar)
+                    )
+                    result = state["L_t"] @ state["L_t"].T
+                    target = state["G"]
+                    error_norm = torch.norm(torch.abs(target - result)) / torch.norm(
+                        target
+                    )
+
+                    # print("norm target", torch.norm(target))
 
                 rank_U = torch.linalg.matrix_rank(state["P"])
                 rank_V = torch.linalg.matrix_rank(state["Q"])
@@ -243,6 +302,7 @@ class AdaGramPS(Optimizer):
                     torch.std(grad_vector),
                     beta,
                     group["lr"],
+                    error_norm,
                     rank_U,
                     rank_V,
                     max_U,
