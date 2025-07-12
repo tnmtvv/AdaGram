@@ -4,6 +4,7 @@ import math
 import csv
 import os
 import traceback
+import numpy as np
 
 
 class AdaGramPS(Optimizer):
@@ -15,6 +16,7 @@ class AdaGramPS(Optimizer):
         weight_decay=0,
         max_rank=None,
         log_file=f"results/adagram_logs.csv",
+        task="LinReg",
     ):
         if lr <= 0.0:
             raise ValueError(f"Invalid learning rate: {lr}")
@@ -30,6 +32,8 @@ class AdaGramPS(Optimizer):
         self._initialize_csv()
         self.if_first = True
         self.max_rank = max_rank
+        self.lr = lr
+        self.task = task
 
     def _initialize_csv(self):
         """Initialize CSV file with headers if it doesn't exist"""
@@ -106,7 +110,7 @@ class AdaGramPS(Optimizer):
         # 1 + alpha_t*||g_bar_t||^2 = (1 + ||g_bar_t||^2)^(1/2)
         # alpha_t:
         # alpha_t = ((1 + ||g_bar_t||^2)^(1/2) - 1) / ||g_bar_t||^2
-        return ((1 + g_bar_norm_sq).sqrt() - 1) / (g_bar_norm_sq + eps)
+        return ((1 + g_bar_norm_sq).sqrt() - 1) / (g_bar_norm_sq)
 
     def _compute_beta(self, alpha, g_bar_norm_sq):
         """Compute beta_t as defined in the theorem."""
@@ -121,7 +125,7 @@ class AdaGramPS(Optimizer):
         V_cur, S_cur_T = torch.linalg.qr(L_cur)
         return U_cur, S_cur_T.T, V_cur
 
-    def step(self, closure=None):
+    def step(self, epoch, closure=None):
         """Performs a single optimization step.
 
         Args:
@@ -152,26 +156,39 @@ class AdaGramPS(Optimizer):
                 identity = torch.eye(n, device=grad.device, dtype=grad.dtype)
 
                 if len(state) == 0:
-                    # state["Lt_inv"] = torch.eye(
-                    #     n, device=grad.device, dtype=grad.dtype
-                    # ) * math.sqrt(1 / eps)
-                    state["step_count"] = 0  # Initialize step counter
-                    # state["G_0"] = torch.eye(
-                    #     n, device=grad.device, dtype=grad.dtype
-                    # ) * math.sqrt(eps)
-                    state["G"] = torch.eye(n, device=grad.device, dtype=grad.dtype)
+                    if not max_rank:
+                        max_rank = n
 
+                    eps = 1e-5
+
+                    state["G"] = eps * torch.eye(
+                        n, device=grad.device, dtype=grad.dtype
+                    )
+                    state["L_0"] = torch.linalg.cholesky(state["G"], upper=False)
+                    state["L_0_inv"] = torch.linalg.inv(state["L_0"])
+                    print()
+                    state["step_count"] = 0  # Initialize step counter
+
+                if "P" not in state or "Q" not in state:
                     g_bar = (
-                        torch.eye(n, device=grad.device, dtype=grad.dtype)
-                        # * math.sqrt(1 / eps)
+                        # torch.eye(n, device=grad.device, dtype=grad.dtype)
+                        state["L_0_inv"]
+                        # * math.sqrt(1 / torch.sqrt(torch.tensor(eps)))
                         @ grad_vector
                     )
+                elif "P" in state and "Q" in state:
 
-                else:
+                    # Define dimensions properlys
+                    n = grad_vector.size(0)
+                    identity = torch.eye(n, device=grad.device, dtype=grad.dtype)
+
+                    # Correct matrix operations
                     g_bar = (
-                        (identity - state["P"] @ state["Q"].t())
+                        # (identity - state["P"] @ state["Q"].T)
+                        # @ state["L_0_inv"]
+                        torch.linalg.inv(state["L_t"])
                         @ grad_vector
-                        # * math.sqrt(1 / eps)
+                        # * math.sqrt(1 / torch.sqrt(torch.tensor(eps)))
                     )
 
                 g_bar_norm_sq = torch.dot(g_bar, g_bar)
@@ -186,6 +203,11 @@ class AdaGramPS(Optimizer):
                 g_bar_col = g_bar.reshape(-1, 1)
 
                 state["G"] += torch.ger(grad_vector, grad_vector)
+                G_np = state["G"].cpu().numpy()
+                np.savez_compressed(
+                    f"state_G_PSI/{self.task}_state_G_lr_{self.lr}_rank_{self.max_rank}_epoch_{epoch}.npz",
+                    G=G_np,
+                )
 
                 if "P" in state:
                     update = (
@@ -193,12 +215,12 @@ class AdaGramPS(Optimizer):
                         * torch.ger(g_bar, g_bar)
                         @ (identity - state["P"] @ state["Q"].T)
                     )
-                else:
-                    update = (
-                        beta
-                        * torch.ger(g_bar, g_bar)
-                        # @ (identity - state["P"] @ state["Q"].T)
-                    )
+                # else:
+                #     update = (
+                #         beta
+                #         * torch.ger(g_bar, g_bar)
+                #         # @ (identity - state["P"] @ state["Q"].T)
+                #     )
 
                 if "P" not in state:
                     # print("here")
@@ -206,7 +228,9 @@ class AdaGramPS(Optimizer):
                     state["P"] = beta_g
                     state["Q"] = g_bar_col
 
-                    state["L_t"] = identity + alpha * torch.ger(g_bar, g_bar)
+                    state["L_t"] = state["L_0"] @ (
+                        identity + alpha * torch.ger(g_bar, g_bar)
+                    )
                     result = state["L_t"] @ state["L_t"].T
                     target = state["G"]
                     if not torch.allclose(result, target, atol=1e-3):
@@ -260,7 +284,7 @@ class AdaGramPS(Optimizer):
                         state["U"], state["S"], state["V"] = self.reduce_rank_psi(
                             update, state["U"], state["S"], state["V"]
                         )
-                        # state["V"] = state["V"].T
+
                     # Q_1, S, Q_2 = torch.linalg.svd(state["S"])
                     # Uk = U[:, : self.max_rank]
                     # Sk = S
@@ -313,7 +337,9 @@ class AdaGramPS(Optimizer):
                     state["Q"].shape,
                 )
 
-                precond_grad = g_bar / torch.sqrt(1 + g_bar_norm_sq)
+                # precond_grad = g_bar / torch.sqrt(1 + g_bar_norm_sq)
+
+                precond_grad = torch.linalg.inv(state["L_t"]) @ grad_vector
 
                 param_vector.add_(precond_grad, alpha=-group["lr"])
                 p.data = param_vector.reshape(original_shape)

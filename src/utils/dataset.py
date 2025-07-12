@@ -30,13 +30,22 @@ class SparseDataset(Dataset):
         sparsity_rate_1=0.05,
         sparsity_rate_2=0.15,
         seed=42,
+        if_class=True,
     ):
         super().__init__(n_samples, in_dim, out_dim, noise)
         self.sparsity_rate_1 = sparsity_rate_1
         self.sparsity_rate_2 = sparsity_rate_2
         self.seed = seed
+        self.if_class = if_class
 
     def create_data(self):
+        if self.if_class:
+            X, y = self.create_binary_data()
+        else:
+            X, y = self.create_reg_data()
+        return X, y
+
+    def create_binary_data(self):
         """
         Create toy data where only 2-3 features are truly important,
         and these important features are sparse (mostly zero).
@@ -78,6 +87,45 @@ class SparseDataset(Dataset):
         y = (y > y.median()).long()
 
         return X, y
+
+    def create_reg_data(self):
+        """
+        Create toy data where only 2-3 features are truly important,
+        and these important features are sparse (mostly zero).
+
+        Returns:
+            tuple: (X, y) where X is sparse input data and y is binary target
+        """
+
+        if self.seed:
+            torch.manual_seed(self.seed)
+        X = torch.zeros(self.n_samples, self.in_dim)
+
+        # Feature 1: Very sparse but highly predictive
+        sparse_mask_1 = torch.rand(self.n_samples) < self.sparsity_rate_1
+        X[sparse_mask_1, 0] = torch.randn(sparse_mask_1.sum()) * 3
+
+        # Feature 2: Moderately sparse but important
+        sparse_mask_2 = torch.rand(self.n_samples) < self.sparsity_rate_2
+        X[sparse_mask_2, 1] = torch.randn(sparse_mask_2.sum()) * 2
+
+        # Features 3-5: Dense but less important (noise features)
+        if self.in_dim > 5:
+            X[:, 2:5] = torch.randn(self.n_samples, min(3, self.in_dim - 2)) * 0.5
+            # Remaining features: Pure noise
+            X[:, 5:] = torch.randn(self.n_samples, self.in_dim - 5) * 0.1
+        else:
+            X[:, 2:] = torch.randn(self.n_samples, self.in_dim - 2) * 0.5
+
+        Y = torch.zeros((self.n_samples, self.out_dim))
+        for i in range(self.out_dim):
+            Y[:, i] = (
+                2.0 * X[:, 0]
+                + 1.5 * X[:, 1]
+                + 0.3 * X[:, 2 : min(5, self.in_dim)].sum(axis=1)
+                + torch.randn(self.n_samples) * self.noise
+            )
+        return X, Y
 
 
 class CorrelatedDataset(Dataset):

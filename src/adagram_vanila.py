@@ -301,15 +301,17 @@ class AdaGram(Optimizer):
                     # state["S"] = torch.eye(
                     #     max_rank, device=grad.device, dtype=grad.dtype
                     # )
-                    state["G"] = torch.eye(n, device=grad.device, dtype=grad.dtype)
+                    state["G"] = 1e-5 * torch.eye(
+                        n, device=grad.device, dtype=grad.dtype
+                    )
                     state["step_count"] = 0  # Initialize step counter
-                    L_0 = torch.linalg.cholesky(state["G"], upper=False)
-                    state["L_0_inv"] = torch.linalg.inv(L_0)
+                    state["L_0"] = torch.linalg.cholesky(state["G"], upper=False)
+                    state["L_0_inv"] = torch.linalg.inv(state["L_0"])
 
                 if "P" not in state or "Q" not in state:
                     g_bar = (
-                        torch.eye(n, device=grad.device, dtype=grad.dtype)
-                        @ state["L_0_inv"]
+                        # torch.eye(n, device=grad.device, dtype=grad.dtype)
+                        state["L_0_inv"]
                         # * math.sqrt(1 / torch.sqrt(torch.tensor(eps)))
                         @ grad_vector
                     )
@@ -346,7 +348,9 @@ class AdaGram(Optimizer):
                     state["P"] = beta_g
                     state["Q"] = g_bar_col
 
-                    state["L_t"] = identity + alpha * torch.ger(g_bar, g_bar)
+                    state["L_t"] = state["L_0"] @ (
+                        identity + alpha * torch.ger(g_bar, g_bar)
+                    )
                     result = state["L_t"] @ state["L_t"].T
                     target = state["G"]
                     # if not torch.allclose(result, target, atol=1e-3):

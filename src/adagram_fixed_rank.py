@@ -4,6 +4,7 @@ import math
 import csv
 import os
 import traceback
+import numpy as np
 
 
 class AdaGramFR(Optimizer):
@@ -16,6 +17,7 @@ class AdaGramFR(Optimizer):
         weight_decay=0,
         max_rank=None,
         log_file=f"results/adagram_logs.csv",
+        task="LinReg",
     ):
         if lr <= 0.0:
             raise ValueError(f"Invalid learning rate: {lr}")
@@ -34,9 +36,12 @@ class AdaGramFR(Optimizer):
         else:
             self.log_file = f"results/loggs/nosvd_adagram_logs_{max_rank}.csv"
 
+        self.lr = lr
+
         self._initialize_csv()
         self.if_first = True
         self.max_rank = max_rank
+        self.task = task
 
     def _initialize_csv(self):
         """Initialize CSV file with headers if it doesn't exist"""
@@ -142,14 +147,34 @@ class AdaGramFR(Optimizer):
         V_cur, S_cur_T = torch.linalg.qr(L_cur)
         return U_cur, S_cur_T.T, V_cur
 
-    def reduce_rank_svd(self, M, max_rank):
+    def reduce_rank_svd(self, M, max_rank=5):
+
+        has_nan = torch.isnan(M).any()
+
+        # Check for infinite values (both positive and negative infinity)
+        has_inf = torch.isinf(M).any()
+
+        if has_nan:
+            print("Tensor contains NaN values")
+        if has_inf:
+            print("Tensor contains infinite values")
 
         U, S, Vh = torch.linalg.svd(M, full_matrices=False)
-        # U_k = U[:, :max_rank]
-        # S_k = S[:max_rank]
-        # V_k = Vh[:max_rank, :]
-        # return U_k, S_k, V_k  # Shape: (rows, max_rank)
-        return U, S, Vh
+
+        # print("M.shape", M.shape)
+
+        # Get indices of top max_rank largest singular values
+        # (SVD already returns them sorted, but this shows the general approach)
+        top_indices = torch.argsort(S, descending=True)[:max_rank]
+
+        U_k = U[:, :max_rank]
+        S_k = S[:max_rank]
+        V_k = Vh[:max_rank, :]
+
+        # print("S_k.shape", S_k.shape)
+
+        return U_k, S_k, V_k
+        # return U, S, Vh
 
     def reduce_rank_brand_matrix(self, matrix, new_column, rank):
         """
@@ -268,7 +293,7 @@ class AdaGramFR(Optimizer):
 
         return U_new, Sigma_k, V_new
 
-    def step(self, closure=None):
+    def step(self, epoch, closure=None):
         """Performs a single optimization step.
 
         Args:
@@ -306,23 +331,28 @@ class AdaGramFR(Optimizer):
                 if len(state) == 0:
                     if not max_rank:
                         max_rank = n
-                    state["S"] = torch.eye(
-                        max_rank, device=grad.device, dtype=grad.dtype
-                    )
 
-                    state["G"] = torch.eye(n, device=grad.device, dtype=grad.dtype)
+                    eps = 1e-5
+
+                    state["G"] = eps * torch.eye(
+                        n, device=grad.device, dtype=grad.dtype
+                    )
+                    state["L_0"] = torch.linalg.cholesky(state["G"], upper=False)
+                    state["L_0_inv"] = torch.linalg.inv(state["L_0"])
                     state["step_count"] = 0  # Initialize step counter
 
                 if "P" not in state or "Q" not in state:
-                    g_bar = (
-                        torch.eye(n, device=grad.device, dtype=grad.dtype) @ grad_vector
-                    )
-                elif "P" in state and "Q" in state:
+                    g_bar = state["L_0_inv"] @ grad_vector
+                else:
 
                     n = grad_vector.size(0)
                     identity = torch.eye(n, device=grad.device, dtype=grad.dtype)
 
-                    g_bar = (identity - state["P"] @ state["Q"].T) @ grad_vector
+                    g_bar = (
+                        (identity - state["P"] @ state["Q"].T)
+                        @ state["L_0_inv"]
+                        @ grad_vector
+                    )
 
                 g_bar_norm_sq = torch.dot(g_bar, g_bar)
 
@@ -336,12 +366,19 @@ class AdaGramFR(Optimizer):
                 g_bar_col = g_bar.reshape(-1, 1)
 
                 state["G"] += torch.ger(grad_vector, grad_vector)
+                G_np = state["G"].cpu().numpy()
+                np.savez_compressed(
+                    f"state_G_binclass/{self.task}_state_G_lr_{self.lr}_rank_{self.max_rank}_epoch_{epoch}.npz",
+                    G=G_np,
+                )
 
                 if "P" not in state:
                     state["P"] = beta_g
                     state["Q"] = g_bar_col
 
-                    state["L_t"] = identity + alpha * torch.ger(g_bar, g_bar)
+                    state["L_t"] = state["L_0"] @ (
+                        identity + alpha * torch.ger(g_bar, g_bar)
+                    )
                     result = state["L_t"] @ state["L_t"].T
                     target = state["G"]
                     error_norm = torch.norm(torch.abs(target - result)) / torch.norm(
@@ -349,25 +386,28 @@ class AdaGramFR(Optimizer):
                     )
                     reconstruct_error = torch.tensor(0)
                 else:
-                    L_t_inv = identity - state["P"] @ state["Q"].T
-                    L_t = torch.linalg.inv(L_t_inv) @ (
+                    # L_t_inv = identity - state["P"] @ state["Q"].T
+                    state["L_t"] = state["L_t"] @ (
                         identity + alpha * torch.ger(g_bar, g_bar)
                     )
-                    result = L_t @ L_t.T
+                    result = state["L_t"] @ state["L_t"].T
                     target = state["G"]
-                    if not torch.allclose(result, target, atol=1e-3):
-                        print("False")
-                    else:
-                        print("TRUE!!!")
+                    # if not torch.allclose(result, target, atol=1e-3):
+                    #     print("False")
+                    # else:
+                    #     print("TRUE!!!")
                     identity = torch.eye(
                         state["Q"].shape[0], device=g_bar.device, dtype=g_bar.dtype
                     )
-                    print("torch.norm(target)", torch.norm(target))
+                    # print("torch.norm(target)", torch.norm(target))
                     error_norm = torch.norm(torch.abs(target - result)) / torch.norm(
                         target
                     )
 
                     if max_rank is not None and state["P"].shape[1] >= max_rank:
+                        # if max_rank > state["P"].shape[0]:
+                        #     max_rank = state["P"].shape[0]
+
                         if not self.full_svd:
                             identity = torch.eye(
                                 state["Q"].shape[0],
@@ -388,12 +428,12 @@ class AdaGramFR(Optimizer):
                             matrix = R_u @ R_v.T
 
                             u, sigm, v = torch.linalg.svd(matrix, full_matrices=False)
-                            # uk = u[:, :max_rank]
-                            # sigm = torch.diag(sigm[:max_rank])
-                            # vk = v[:max_rank, :]
-                            uk = u
-                            sigm = torch.diag(sigm)
-                            vk = v
+                            uk = u[:, :max_rank]
+                            sigm = torch.diag(sigm[:max_rank])
+                            vk = v[:max_rank, :]
+                            # uk = u
+                            # sigm = torch.diag(sigm)
+                            # vk = v
 
                             state["P"] = Q_u @ uk @ sigm
                             state["Q"] = Q_v @ vk.T

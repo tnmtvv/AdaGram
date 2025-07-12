@@ -162,3 +162,4 @@ cython_debug/
 *.pdf
 *.pt
 /notebooks/gradients
+*.npz

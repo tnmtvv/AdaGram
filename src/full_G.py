@@ -310,7 +310,6 @@ class FullAdaGrad(Optimizer):
                 sqrt_eigenvals = torch.sqrt(eigenvals)
                 sqr_G = eigenvecs @ torch.diag(sqrt_eigenvals) @ eigenvecs.T
 
-                # sqr_G = torch.linalg.matrix_power(state["G"], 0.5)
                 precond_grad = torch.linalg.inv(sqr_G) @ grad_vector
 
                 param_vector.add_(precond_grad, alpha=-group["lr"])

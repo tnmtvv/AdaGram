@@ -50,12 +50,16 @@ def gt_Lt(L_t, g):
     return L_t, g_bar
 
 
-@pytest.mark.parametrize("dim, n_steps", [(4, 5), (6, 3)])
+@pytest.mark.parametrize("dim, n_steps", [(4, 10), (6, 10)])
 def test_pq_Lt_vs_gt_Lt(dim, n_steps):
     torch.manual_seed(42)
+    eps = 1e-5
+    print(eps)
     # Initial values
-    G = torch.eye(dim)
+    G = eps * torch.eye(dim)
     L_0 = torch.linalg.cholesky(G, upper=False)
+    # L_0 = eps * torch.eye(dim)
+    print("L_0", L_0)
     L_0_inv = torch.linalg.inv(L_0)
     P = None
     Q = None
@@ -73,7 +77,7 @@ def test_pq_Lt_vs_gt_Lt(dim, n_steps):
         # Compare g_bar
 
         assert torch.allclose(
-            g_bar_pq, g_bar_gt, atol=1e-2
+            g_bar_pq, g_bar_gt, atol=1e-4
         ), f"g_bar mismatch at step {i}"
         print("Max abs diff:", torch.max(torch.abs(g_bar_pq - g_bar_gt)).item())
 
