@@ -3,121 +3,51 @@ from torch.optim import Optimizer
 import math
 import csv
 import os
-import traceback
-import numpy as np
+
+from typing import Optional, Dict, Any, Tuple
+from src.adagram_base import AdaGram, AdaGramLogger
 
 
-class AdaGramPS(Optimizer):
+class AdaGramPS(AdaGram):
+
     def __init__(
         self,
         params,
-        lr=0.1,
-        eps=1e-10,
-        weight_decay=0,
-        max_rank=None,
-        log_file=f"results/adagram_logs.csv",
-        task="LinReg",
+        lr: float = 1.0,
+        eps: float = 1e-10,
+        weight_decay: float = 0,
+        max_rank: Optional[int] = None,
+        task: str = "LinReg",
+        logger: Optional["AdaGramLogger"] = None,
+        enable_logging: bool = True,
     ):
-        if lr <= 0.0:
-            raise ValueError(f"Invalid learning rate: {lr}")
-        if eps <= 0.0:
-            raise ValueError(f"Invalid epsilon value: {eps}")
-        if weight_decay < 0.0:
-            raise ValueError(f"Invalid weight_decay value: {weight_decay}")
+        """
+        Initialize AdaGramPS optimizer
 
-        defaults = dict(lr=lr, eps=eps, weight_decay=weight_decay, max_rank=max_rank)
-        super(AdaGramPS, self).__init__(params, defaults)
-
-        self.log_file = log_file
-        self._initialize_csv()
-        self.if_first = True
-        self.max_rank = max_rank
-        self.lr = lr
-        self.task = task
-
-    def _initialize_csv(self):
-        """Initialize CSV file with headers if it doesn't exist"""
-        if not os.path.isfile(self.log_file):
-            with open(self.log_file, "a", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(
-                    [
-                        "step",
-                        "param_id",
-                        "grad_norm",
-                        "grad_std",
-                        "beta",
-                        "lr",
-                        "error_norm",
-                        "rank_U",
-                        "rank_V",
-                        "max_U",
-                        "min_U",
-                        "max_V",
-                        "min_V",
-                        "U_shape_0",
-                        "U_shape_1",
-                        "V_shape_0",
-                        "V_shape_1",
-                    ]
-                )
-
-    def _log_to_csv(
-        self,
-        step_count,
-        param_id,
-        grad_norm,
-        grad_std,
-        beta,
-        lr,
-        error_norm,
-        rank_U,
-        rank_V,
-        max_U,
-        min_U,
-        max_V,
-        min_V,
-        U_shape,
-        V_shape,
-    ):
-        """Log optimizer statistics to CSV file"""
-        with open(self.log_file, "a", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(
-                [
-                    step_count,
-                    param_id,
-                    grad_norm.item(),
-                    grad_std.item(),
-                    beta.item(),
-                    lr,
-                    error_norm.item(),
-                    rank_U.item(),
-                    rank_V.item(),
-                    max_U.item(),
-                    min_U.item(),
-                    max_V.item(),
-                    min_V.item(),
-                    U_shape[0],
-                    U_shape[1],
-                    V_shape[0],
-                    V_shape[1],
-                ]
-            )
-
-    def _compute_alpha(self, g_bar_norm_sq, eps):
-        """Compute alpha_t that satisfies the equation (6) in the theorem."""
-        # 1 + alpha_t*||g_bar_t||^2 = (1 + ||g_bar_t||^2)^(1/2)
-        # alpha_t:
-        # alpha_t = ((1 + ||g_bar_t||^2)^(1/2) - 1) / ||g_bar_t||^2
-        return ((1 + g_bar_norm_sq).sqrt() - 1) / (g_bar_norm_sq)
-
-    def _compute_beta(self, alpha, g_bar_norm_sq):
-        """Compute beta_t as defined in the theorem."""
-        return alpha / (1 + alpha * g_bar_norm_sq)
+        Args:
+            params: Model parameters
+            lr: Learning rate
+            eps: Epsilon for numerical stability
+            weight_decay: Weight decay factor
+            max_rank: Maximum rank for approximation
+            task: Task name
+            logger: Custom logger instance
+            enable_logging: Whether to enable logging
+        """
+        # Call parent constructor with all required parameters
+        super().__init__(
+            params=params,
+            lr=lr,
+            eps=eps,
+            weight_decay=weight_decay,
+            max_rank=max_rank,
+            task=task,
+            logger=logger,
+            enable_logging=enable_logging,
+        )
 
     def reduce_rank_psi(self, delta_A, U_0, S_0, V_0):
-        """Standard SVD rank reduction"""
+
         K_cur = U_0 @ S_0 + delta_A @ V_0
         U_cur, S_hat = torch.linalg.qr(K_cur)
         S_tild = S_hat - U_cur.T @ delta_A @ V_0
@@ -125,223 +55,61 @@ class AdaGramPS(Optimizer):
         V_cur, S_cur_T = torch.linalg.qr(L_cur)
         return U_cur, S_cur_T.T, V_cur
 
-    def step(self, epoch, closure=None):
-        """Performs a single optimization step.
+    def update_PQ(
+        self,
+        state: Dict[str, Any],
+        beta: torch.Tensor,
+        g_bar: torch.Tensor,
+    ):
 
-        Args:
-            closure (callable, optional): A closure that reevaluates the model
-                    and returns the loss.
-        """
-        loss = None
-        if closure is not None:
-            loss = closure()
+        beta_g = (beta * g_bar).reshape(-1, 1)
+        g_bar_col = g_bar.reshape(-1, 1)
 
-        for group in self.param_groups:
-            eps = group["eps"]
-            max_rank = group.get("max_rank")
+        reconstruct_error = torch.tensor(0)
 
-            for param_idx, p in enumerate(group["params"]):
-                if p.grad is None:
-                    continue
+        if "P" not in state:
+            # print("here")
+            # print("'U' not in state")
+            state["P"] = beta_g
+            state["Q"] = g_bar_col
 
-                grad = p.grad.data
-                state = self.state[p]
+        elif self.max_rank is not None and state["P"].shape[1] < self.max_rank:
+            identity = torch.eye(
+                state["Q"].shape[0], device=g_bar.device, dtype=g_bar.dtype
+            )
+            v_upd = ((identity - state["Q"] @ state["P"].T) @ g_bar).reshape(-1, 1)
+            state["P"] = torch.concat([state["P"], beta_g], dim=1)
+            state["Q"] = torch.concat([state["Q"], v_upd], dim=1)
 
-                original_shape = p.data.shape
-
-                grad_vector = grad.reshape(-1)
-                param_vector = p.data.reshape(-1)
-                n = len(grad_vector)
-
-                identity = torch.eye(n, device=grad.device, dtype=grad.dtype)
-
-                if len(state) == 0:
-                    if not max_rank:
-                        max_rank = n
-
-                    eps = 1e-5
-
-                    state["G"] = eps * torch.eye(
-                        n, device=grad.device, dtype=grad.dtype
-                    )
-                    state["L_0"] = torch.linalg.cholesky(state["G"], upper=False)
-                    state["L_0_inv"] = torch.linalg.inv(state["L_0"])
-                    print()
-                    state["step_count"] = 0  # Initialize step counter
-
-                if "P" not in state or "Q" not in state:
-                    g_bar = (
-                        # torch.eye(n, device=grad.device, dtype=grad.dtype)
-                        state["L_0_inv"]
-                        # * math.sqrt(1 / torch.sqrt(torch.tensor(eps)))
-                        @ grad_vector
-                    )
-                elif "P" in state and "Q" in state:
-
-                    # Define dimensions properlys
-                    n = grad_vector.size(0)
-                    identity = torch.eye(n, device=grad.device, dtype=grad.dtype)
-
-                    # Correct matrix operations
-                    g_bar = (
-                        # (identity - state["P"] @ state["Q"].T)
-                        # @ state["L_0_inv"]
-                        torch.linalg.inv(state["L_t"])
-                        @ grad_vector
-                        # * math.sqrt(1 / torch.sqrt(torch.tensor(eps)))
-                    )
-
-                g_bar_norm_sq = torch.dot(g_bar, g_bar)
-
-                # equation (6)
-                alpha = self._compute_alpha(g_bar_norm_sq, eps)
-
-                # equation (7)
-                beta = self._compute_beta(alpha, g_bar_norm_sq)
-
-                beta_g = (beta * g_bar).reshape(-1, 1)
-                g_bar_col = g_bar.reshape(-1, 1)
-
-                state["G"] += torch.ger(grad_vector, grad_vector)
-                G_np = state["G"].cpu().numpy()
-                np.savez_compressed(
-                    f"state_G_PSI/{self.task}_state_G_lr_{self.lr}_rank_{self.max_rank}_epoch_{epoch}.npz",
-                    G=G_np,
+        elif self.max_rank is not None and state["P"].shape[1] >= self.max_rank:
+            if "U" not in state:
+                state["U"], state["S"], state["V"] = torch.linalg.svd(
+                    state["P"] @ state["Q"].T
                 )
+                # state["S"] = torch.diag(state["S"][: self.max_rank])
+                # state["U"] = state["U"][:, : self.max_rank]
+                # state["V"] = state["V"][: self.max_rank, :].T
+                state["S"] = torch.diag(state["S"])
+                state["U"] = state["U"]
+                state["V"] = state["V"].T
 
-                if "P" in state:
-                    update = (
-                        beta
-                        * torch.ger(g_bar, g_bar)
-                        @ (identity - state["P"] @ state["Q"].T)
-                    )
-                # else:
-                #     update = (
-                #         beta
-                #         * torch.ger(g_bar, g_bar)
-                #         # @ (identity - state["P"] @ state["Q"].T)
-                #     )
+            identity = torch.eye(
+                state["P"].shape[0], device=g_bar.device, dtype=g_bar.dtype
+            )
+            update = (
+                beta * torch.ger(g_bar, g_bar) @ (identity - state["P"] @ state["Q"].T)
+            )
+            prev_matrix = state["U"] @ state["S"] @ state["V"].T
 
-                if "P" not in state:
-                    # print("here")
-                    # print("'U' not in state")
-                    state["P"] = beta_g
-                    state["Q"] = g_bar_col
+            state["U"], state["S"], state["V"] = self.reduce_rank_psi(
+                update, state["U"], state["S"], state["V"]
+            )
+            cur_matrix = prev_matrix + update
 
-                    state["L_t"] = state["L_0"] @ (
-                        identity + alpha * torch.ger(g_bar, g_bar)
-                    )
-                    result = state["L_t"] @ state["L_t"].T
-                    target = state["G"]
-                    if not torch.allclose(result, target, atol=1e-3):
-                        print("the first one")
-                        # print("False")
-                        # print("L_t @ L_t.T:\n", result)
-                        # print("state['G']:\n", target)
-                    else:
-                        print("the first one")
-                        # print("TRUE!!!")
-                        # print("state['G']:\n", target)
-                    error_norm = torch.norm(torch.abs(target - result)) / torch.norm(
-                        target
-                    )
+            reconstruct_error = torch.norm(
+                torch.abs(cur_matrix - state["U"] @ torch.diag(state["S"]) @ state["V"])
+            ) / torch.norm(cur_matrix)
 
-                elif max_rank is not None and state["P"].shape[1] < max_rank:
-                    identity = torch.eye(
-                        state["Q"].shape[0], device=g_bar.device, dtype=g_bar.dtype
-                    )
-                    v_upd = ((identity - state["Q"] @ state["P"].T) @ g_bar).reshape(
-                        -1, 1
-                    )
-                    state["P"] = torch.concat([state["P"], beta_g], dim=1)
-                    state["Q"] = torch.concat([state["Q"], v_upd], dim=1)
-
-                    identity = torch.eye(n, device=grad.device, dtype=grad.dtype)
-
-                    state["L_t"] = state["L_t"] @ (
-                        identity + alpha * torch.ger(g_bar, g_bar)
-                    )
-                    result = state["L_t"] @ state["L_t"].T
-                    target = state["G"]
-                    error_norm = torch.norm(torch.abs(target - result)) / torch.norm(
-                        target
-                    )
-                    # print("norm target", torch.norm(target))
-
-                elif max_rank is not None and state["P"].shape[1] >= max_rank:
-                    if "U" not in state:
-                        state["U"], state["S"], state["V"] = torch.linalg.svd(
-                            state["P"] @ state["Q"].T
-                        )
-                        # state["S"] = torch.diag(state["S"][: self.max_rank])
-                        # state["U"] = state["U"][:, : self.max_rank]
-                        # state["V"] = state["V"][: self.max_rank, :].T
-                        state["S"] = torch.diag(state["S"])
-                        state["U"] = state["U"]
-                        state["V"] = state["V"].T
-
-                    else:
-                        state["U"], state["S"], state["V"] = self.reduce_rank_psi(
-                            update, state["U"], state["S"], state["V"]
-                        )
-
-                    # Q_1, S, Q_2 = torch.linalg.svd(state["S"])
-                    # Uk = U[:, : self.max_rank]
-                    # Sk = S
-                    # Vk = V[: self.max_rank, :]
-                    state["P"] = state["U"] @ state["S"]
-                    state["Q"] = state["V"]
-
-                    identity = torch.eye(n, device=grad.device, dtype=grad.dtype)
-                    # L_t_inv = identity - state["P"] @ state["Q"].T
-                    # L_t_p_inv = (identity - beta * torch.ger(g_bar, g_bar)) @ L_t_inv
-                    # print("det", torch.linalg.det(L_t_p_inv))
-                    state["L_t"] = state["L_t"] @ (
-                        identity + alpha * torch.ger(g_bar, g_bar)
-                    )
-                    result = state["L_t"] @ state["L_t"].T
-                    target = state["G"]
-                    error_norm = torch.norm(torch.abs(target - result)) / torch.norm(
-                        target
-                    )
-
-                    # print("norm target", torch.norm(target))
-
-                rank_U = torch.linalg.matrix_rank(state["P"])
-                rank_V = torch.linalg.matrix_rank(state["Q"])
-
-                max_U = state["P"].max()
-                max_V = state["Q"].max()
-
-                min_U = state["P"].min()
-                min_V = state["Q"].min()
-
-                # Increment step counter
-                state["step_count"] += 1
-
-                self._log_to_csv(
-                    state["step_count"],
-                    param_idx,
-                    torch.sqrt(torch.dot(grad_vector, grad_vector)),
-                    torch.std(grad_vector),
-                    beta,
-                    group["lr"],
-                    error_norm,
-                    rank_U,
-                    rank_V,
-                    max_U,
-                    min_U,
-                    max_V,
-                    min_V,
-                    state["P"].shape,
-                    state["Q"].shape,
-                )
-
-                # precond_grad = g_bar / torch.sqrt(1 + g_bar_norm_sq)
-
-                precond_grad = torch.linalg.inv(state["L_t"]) @ grad_vector
-
-                param_vector.add_(precond_grad, alpha=-group["lr"])
-                p.data = param_vector.reshape(original_shape)
-
-        return loss
+            state["P"] = state["U"] @ state["S"]
+            state["Q"] = state["V"]
+        return state["P"], state["Q"], reconstruct_error

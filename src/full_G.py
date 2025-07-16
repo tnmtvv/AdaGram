@@ -5,6 +5,8 @@ import csv
 import os
 import traceback
 
+from src.adagram_base import AdaGram, AdaGramLogger
+
 
 class FullAdaGrad(Optimizer):
     def __init__(
@@ -13,7 +15,7 @@ class FullAdaGrad(Optimizer):
         lr=1.0,
         eps=1e-10,
         weight_decay=0,
-        log_file=f"results/adagram_logs.csv",
+        log_file=f"results/loggs/adagram_full_adagrad.csv",
     ):
         if lr <= 0.0:
             raise ValueError(f"Invalid learning rate: {lr}")
@@ -25,16 +27,10 @@ class FullAdaGrad(Optimizer):
         defaults = dict(lr=lr, eps=eps, weight_decay=weight_decay)
         super(FullAdaGrad, self).__init__(params, defaults)
 
-        # CSV logging setup
-        # if self.full_svd:
-        #     self.log_file = f"results/loggs/svd_adagram_logs.csv"
-        # else:
-        #     self.log_file = f"results/loggs/nosvd_adagram_logs.csv"
-
-        self.log_file = f"results/loggs/adagram_vanila.csv"
+        self.log_file = log_file
 
         self._initialize_csv()
-        self.if_first = True
+        self.eps = eps
 
     def _initialize_csv(self):
         """Initialize CSV file with headers if it doesn't exist"""
@@ -49,7 +45,6 @@ class FullAdaGrad(Optimizer):
                         "grad_std",
                         "beta",
                         "lr",
-                        "error_norm",
                         "error_norm",
                         "rank_U",
                         "rank_V",
@@ -109,159 +104,11 @@ class FullAdaGrad(Optimizer):
 
     def _compute_alpha(self, g_bar_norm_sq, eps=1e-10):
         """Compute alpha_t that satisfies the equation (6) in the theorem."""
-        # 1 + alpha_t*||g_bar_t||^2 = (1 + ||g_bar_t||^2)^(1/2)
-        # alpha_t:
-        # alpha_t = ((1 + ||g_bar_t||^2)^(1/2) - 1) / ||g_bar_t||^2
         return ((1 + g_bar_norm_sq).sqrt() - 1) / (g_bar_norm_sq)
 
     def _compute_beta(self, alpha, g_bar_norm_sq):
         """Compute beta_t as defined in the theorem."""
         return alpha / (1 + alpha * g_bar_norm_sq)
-
-    def is_orthogonal(self, U, tolerance=1e-6):
-        """Check if matrix U is orthogonal"""
-        # Compute U^T @ U
-        product = U.T @ U
-
-        # Create identity matrix of same size
-        identity = torch.eye(U.shape[1], device=U.device, dtype=U.dtype)
-
-        # Check if they're approximately equal
-        return torch.allclose(product, identity, atol=tolerance)
-
-    def reduce_rank_psi(self, delta_A, U_0, S_0, V_0):
-        """Standard SVD rank reduction"""
-        K_cur = U_0 @ S_0 + delta_A @ V_0
-        U_cur, S_hat = torch.linalg.qr(K_cur)
-        S_tild = S_hat - U_cur.T @ delta_A @ V_0
-        L_cur = V_0 @ S_tild.T + delta_A.T @ U_cur
-        V_cur, S_cur_T = torch.linalg.qr(L_cur)
-        return U_cur, S_cur_T.T, V_cur
-
-    def reduce_rank_svd(self, M, max_rank):
-
-        U, S, Vh = torch.linalg.svd(M, full_matrices=False)
-        U_k = U[:, :max_rank]
-        S_k = S[:max_rank]
-        V_k = Vh[:max_rank, :]
-        return U_k, S_k, V_k  # Shape: (rows, max_rank)
-
-    def reduce_rank_brand_matrix(self, matrix, new_column, rank):
-        """
-        Update rank-r SVD when a new column is appended to the original matrix.
-
-        Parameters:
-        - matrix: Original matrix (m x n)
-        - new_column: New column to be appended (m,)
-        - rank: Desired rank of approximation
-
-        Returns:
-        - U: Updated U matrix (m x r)
-        - S: Updated singular values matrix (r x r)
-        - V: Updated V matrix (n+1 x r)
-        """
-        m, n = matrix.shape
-        r = min(min(matrix.shape), rank)
-
-        # Compute SVD of original matrix
-        U, S_vals, Vh = torch.linalg.svd(matrix, full_matrices=False)
-        S = torch.diag(S_vals)
-
-        # Project new column onto U
-        U_t_new_col = U.T @ new_column
-        new_column_proj = new_column - U @ U_t_new_col
-        p_norm = torch.norm(new_column_proj)
-
-        # Construct K matrix
-        zeros_row = torch.zeros(1, S.shape[0], device=matrix.device, dtype=matrix.dtype)
-        K_top = torch.cat([S, U_t_new_col.reshape(-1, 1)], dim=1)
-        K_bottom = torch.cat([zeros_row, p_norm.unsqueeze(0).unsqueeze(1)], dim=1)
-        K = torch.cat([K_top, K_bottom], dim=0)
-        print("K", K.shape)
-
-        # SVD of K
-        Uk, Sigma_k_vals, Vk_t = torch.linalg.svd(K, full_matrices=False)
-        Sigma_k = torch.diag(Sigma_k_vals[:r])
-        Uk_r = Uk[:, :r]
-        Vk_r = Vk_t[:r, :].T
-
-        # Normalize new column projection
-        if p_norm > 1e-5:
-            new_col_normalized = new_column_proj / p_norm
-        else:
-            new_col_normalized = torch.zeros(
-                m, device=matrix.device, dtype=matrix.dtype
-            )
-
-        # Update U and V
-        U_concat = torch.cat([U, new_col_normalized.reshape(-1, 1)], dim=1)
-        U_new = U_concat @ Uk_r
-
-        V_concat = torch.cat(
-            [Vh.T, torch.zeros(n, 1, device=matrix.device, dtype=matrix.dtype)], dim=1
-        )
-        last_row = torch.zeros(1, n + 1, device=matrix.device, dtype=matrix.dtype)
-        last_row[0, -1] = 1
-        V_concat = torch.cat([V_concat, last_row], dim=0)
-        V_new = V_concat @ Vk_r
-
-        return U_new, Sigma_k, V_new
-
-    def reduce_rank_brand_usv(self, U, S, V, new_column, rank):
-        """
-        Update rank-r SVD when a new column is appended to the original matrix.
-
-        Parameters:
-        - matrix: Original matrix (m x n)
-        - new_column: New column to be appended (m,)
-        - rank: Desired rank of approximation
-
-        Returns:
-        - U: Updated U matrix (m x r)
-        - S: Updated singular values matrix (r x r)
-        - V: Updated V matrix (n+1 x r)
-        """
-        m = U.shape[0]
-        n = V.shape[1]
-
-        print("m", m)
-        print("n", n)
-
-        U_t_new_col = U.T @ new_column
-        new_column_proj = new_column - U @ U_t_new_col
-        p_norm = torch.norm(new_column_proj)
-
-        # Construct K matrix
-        zeros_row = torch.zeros(1, S.shape[0], device=U.device, dtype=U.dtype)
-        K_top = torch.cat([S, U_t_new_col.reshape(-1, 1)], dim=1)
-        K_bottom = torch.cat([zeros_row, p_norm.unsqueeze(0).unsqueeze(1)], dim=1)
-        K = torch.cat([K_top, K_bottom], dim=0)
-
-        # SVD of K
-        Uk, Sigma_k_vals, Vk_t = torch.linalg.svd(K, full_matrices=False)
-        Sigma_k = torch.diag(Sigma_k_vals[:rank])
-        Uk_r = Uk[:, :rank]
-        Vk_r = Vk_t[:rank, :].T
-
-        # Normalize new column projection
-        if p_norm > 1e-5:
-            new_col_normalized = new_column_proj / p_norm
-        else:
-            new_col_normalized = torch.zeros(m, device=U.device, dtype=U.dtype)
-
-        # Update U and V
-        U_concat = torch.cat([U, new_col_normalized.reshape(-1, 1)], dim=1)
-        U_new = U_concat @ Uk_r
-
-        V_concat = torch.cat(
-            [V.T, torch.zeros(n, 1, device=V.device, dtype=U.dtype)], dim=1
-        )
-        last_row = torch.zeros(1, n + 1, device=U.device, dtype=U.dtype)
-        last_row[0, -1] = 1
-        V_concat = torch.cat([V_concat, last_row], dim=0)
-        V_new = V_concat @ Vk_r
-
-        return U_new, Sigma_k, V_new
 
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -276,9 +123,6 @@ class FullAdaGrad(Optimizer):
 
         for group in self.param_groups:
 
-            eps = group["eps"]
-            max_rank = group.get("max_rank")
-
             for param_idx, p in enumerate(group["params"]):
                 if p.grad is None:
                     continue
@@ -289,19 +133,16 @@ class FullAdaGrad(Optimizer):
 
                 original_shape = p.data.shape
 
-                # print("grad.shape!!!!!!!!!!!", grad.shape)
                 grad_vector = grad.reshape(-1)
                 param_vector = p.data.reshape(-1)
                 n = len(grad_vector)
-                # print(param_vector)
-
-                identity = torch.eye(n, device=grad.device, dtype=grad.dtype)
 
                 if len(state) == 0:
-                    # state["S"] = torch.eye(
-                    #     max_rank, device=grad.device, dtype=grad.dtype
-                    # )
-                    state["G"] = torch.eye(n, device=grad.device, dtype=grad.dtype)
+                    print("self.eps", self.eps)
+                    print("grad_vector", grad_vector)
+                    state["G"] = self.eps * torch.eye(
+                        n, device=grad.device, dtype=grad.dtype
+                    )
                     state["step_count"] = 0  # Initialize step counter
 
                 state["G"] += torch.ger(grad_vector, grad_vector)
@@ -309,6 +150,8 @@ class FullAdaGrad(Optimizer):
                 eigenvals, eigenvecs = torch.linalg.eigh(state["G"])
                 sqrt_eigenvals = torch.sqrt(eigenvals)
                 sqr_G = eigenvecs @ torch.diag(sqrt_eigenvals) @ eigenvecs.T
+                # print("eigenvals", eigenvals)
+                # sqrt_G = torch.linalg.cholesky(state["G"])
 
                 precond_grad = torch.linalg.inv(sqr_G) @ grad_vector
 

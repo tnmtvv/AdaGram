@@ -130,7 +130,13 @@ class SparseDataset(Dataset):
 
 class CorrelatedDataset(Dataset):
     def __init__(
-        self, n_samples, in_dim, out_dim=1, noise=0.1, correlation_strength=0.7
+        self,
+        n_samples,
+        in_dim,
+        out_dim=1,
+        seed=100,
+        noise=0.1,
+        correlation_strength=0.7,
     ):
         super().__init__(n_samples, in_dim, out_dim, noise)
         self.correlation_strength = correlation_strength
@@ -176,7 +182,7 @@ class CorrelatedDataset(Dataset):
 
 
 class LinearDataset(Dataset):
-    def __init__(self, n_samples, in_dim, out_dim=1, noise=0.1):
+    def __init__(self, n_samples, in_dim, out_dim=1, seed=100, noise=0.1):
         super().__init__(n_samples, in_dim, out_dim, noise)
 
     def create_data(self):

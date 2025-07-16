@@ -1,18 +1,12 @@
 import torch
 from torch.optim import Optimizer
-import math
-import csv
-import os
-import traceback
-import numpy as np
-from typing import Optional, Dict, Any, Tuple
 
+
+from typing import Optional, Dict, Any, Tuple
 from src.adagram_base import AdaGram, AdaGramLogger
 
 
-class AdaGramFR(AdaGram):
-    """AdaGramFR - AdaGram with Full Rank reduction using SVD"""
-
+class AdaGramVanilla(AdaGram):
     def __init__(
         self,
         params,
@@ -25,7 +19,7 @@ class AdaGramFR(AdaGram):
         enable_logging: bool = True,
     ):
         """
-        Initialize AdaGramFR optimizer
+        Initialize AdaGramVanilla optimizer
 
         Args:
             params: Model parameters
@@ -48,38 +42,6 @@ class AdaGramFR(AdaGram):
             logger=logger,
             enable_logging=enable_logging,
         )
-
-    def reduce_rank_svd(
-        self, M: torch.Tensor, max_rank: int = 5
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        Reduce rank using SVD decomposition with numerical stability checks
-
-        Args:
-            M: Matrix to decompose
-            max_rank: Maximum rank to keep
-
-        Returns:
-            Tuple of (U_k, S_k, V_k) - reduced rank decomposition
-        """
-        # Check for numerical issues
-        has_nan = torch.isnan(M).any()
-        has_inf = torch.isinf(M).any()
-
-        if has_nan:
-            print("Warning: Tensor contains NaN values")
-        if has_inf:
-            print("Warning: Tensor contains infinite values")
-
-        # Perform SVD
-        U, S, Vh = torch.linalg.svd(M, full_matrices=False)
-
-        # Keep only top max_rank components
-        U_k = U[:, :max_rank]
-        S_k = S[:max_rank]
-        V_k = Vh[:max_rank, :]
-
-        return U_k, S_k, V_k
 
     def update_PQ(
         self,
@@ -116,22 +78,9 @@ class AdaGramFR(AdaGram):
             v_upd = ((identity - state["Q"] @ state["P"].T) @ g_bar).reshape(-1, 1)
 
             # Extend matrices
+
             P = torch.cat([state["P"], beta_g], dim=1)
             Q = torch.cat([state["Q"], v_upd], dim=1)
             reconstruct_error = torch.tensor(0.0)
-
-            # Apply rank reduction if necessary
-            if self.max_rank is not None and P.shape[1] > self.max_rank:
-                rec_target = P @ Q.T
-                U, S, V = self.reduce_rank_svd(rec_target, max_rank=self.max_rank)
-
-                # Update P and Q with reduced rank approximation
-                P = U @ torch.diag(S)
-                Q = V.T
-
-                # Calculate reconstruction error
-                reconstruct_error = torch.norm(
-                    torch.abs(rec_target - U @ torch.diag(S) @ V)
-                ) / torch.norm(rec_target)
 
         return P, Q, reconstruct_error

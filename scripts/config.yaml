@@ -1,0 +1,89 @@
+# Experiment Configuration
+experiment:
+  name: "optimizer_comparison"
+  seed: 42
+  
+# Data Configuration
+data:
+  n_samples: 300
+  in_dims: [20]
+  out_dims: [2]
+  test_size: 0.2
+  data_seeds: [10]
+  
+# Training Configuration
+training:
+  num_epochs: 10
+  batch_size: 1
+  learning_rates: [0.1]
+  ranks: [1, 2, 3, 4, 5]
+  shuffle: true
+  use_tqdm: true
+  
+# Model Configuration
+models:
+  BinClass:
+    model_seed: 100
+    loss_function: "CrossEntropyLoss"
+  LinReg:
+    model_seed: 100
+    loss_function: "MSELoss"
+    
+# Optimizer Configuration
+optimizers:
+  AdaGramPS:
+    enabled: false
+    requires_rank: true
+  AdaGramFR_svd:
+    enabled: false
+    requires_rank: true
+  AdaGramFR_nosvd:
+    enabled: false
+    requires_rank: true
+  Torch_Adagrad:
+    enabled: true
+    requires_rank: false
+  Shampoo:
+    enabled: false
+    requires_rank: false
+  FullAdaGrad:
+    enabled: false
+    requires_rank: false
+  AdaGram:
+    enabled: true
+    requires_rank: false
+  Vanilla_SGD:
+    enabled: false
+    requires_rank: false
+    
+# Output Configuration
+output:
+  results_dir: "results"
+  plots_dir: "plots"
+  gradients_dir: "gradients"
+  
+# Plotting Configuration
+plotting:
+  figure_size: [15, 8]
+  height: 5
+  aspect: 1.2
+  palette: "pastel"
+  linewidth: 1.5
+  fontsize:
+    title: 24
+    axis_label: 16
+    legend_title: 20
+    
+# Tasks Configuration
+tasks:
+  enabled_tasks: ["BinClass"]  # Options: ["BinClass", "LinReg"]
+  
+# Dataset Configuration
+dataset:
+  type: "SparseDataset"  # Options: SparseDataset, CorrelatedDataset, LinearDataset
+  sparse_config:
+    if_class: true
+  correlated_config:
+    correlation: 0.8
+  linear_config:
+    noise_std: 0.1
