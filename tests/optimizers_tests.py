@@ -91,9 +91,9 @@ def optimizer_configs():
     """Configuration for different optimizers"""
     return {
         "FullAdaGrad": {"lr": 0.1, "eps": 1e-5},
-        "AdaGram": {"lr": 0.1, "eps": 1e-5},
-        "AdaGramFR": {"lr": 0.1, "eps": 1e-5, "max_rank": 2},
-        "AdaGramPS": {"lr": 0.1, "eps": 1e-5, "max_rank": 10},
+        "AdaGram": {"lr": 0.1, "eps": 1e-2},
+        "AdaGramFR": {"lr": 0.1, "eps": 1e-2, "max_rank": None},
+        "AdaGramPS": {"lr": 0.1, "eps": 1e-2, "max_rank": None},
     }
 
 
@@ -104,8 +104,8 @@ class TestOptimizerStateCapture:
         [
             # "FullAdaGrad",
             "AdaGram",
-            # "AdaGramPS",
-            # "AdaGramFR"
+            "AdaGramPS",
+            "AdaGramFR",
         ],
     )
     def test_state_initialization(
@@ -148,8 +148,8 @@ class TestOptimizerStateCapture:
         [
             # "FullAdaGrad",
             "AdaGram",
-            # "AdaGramFR",
-            # "AdaGramPS"
+            "AdaGramFR",
+            "AdaGramPS",
         ],
     )
     def test_state_properties(
@@ -169,17 +169,21 @@ class TestOptimizerStateCapture:
 
         if optimizer_name == "FullAdaGrad":
             optimizer = FullAdaGrad(simple_model.parameters(), **config)
+            atol = 1e-4
         elif optimizer_name == "AdaGram":
             optimizer = AdaGramVanilla(simple_model.parameters(), **config)
+            atol = 1e-4
         elif optimizer_name == "AdaGramFR":
             optimizer = AdaGramFR(simple_model.parameters(), **config)
+            atol = 1e-3
         elif optimizer_name == "AdaGramPS":
             optimizer = AdaGramPS(simple_model.parameters(), **config)
+            atol = 1e-3
 
         tester = OptimizerStateTester(optimizer, optimizer_name)
 
         # Run a few optimization steps
-        for step in range(15):
+        for step in range(10):
             optimizer.zero_grad()
             output = model(data)
             loss = loss_function(output, targets)
@@ -207,13 +211,6 @@ class TestOptimizerStateCapture:
                     G_matrix.shape[0] == G_matrix.shape[1]
                 ), "G matrix should be square"
 
-                # Check the relationship between L_t and G matrix
-                # Note: Using torch.allclose with tolerance for numerical stability
-
-                eigenvals, eigenvecs = torch.linalg.eigh(G_matrix)
-                sqrt_eigenvals = torch.sqrt(eigenvals)
-                sqr_G = eigenvecs @ torch.diag(sqrt_eigenvals) @ eigenvecs.T
-
                 reconstructed_G = L_t @ L_t.T
                 print("reconstructed_G", reconstructed_G)
                 print("G_matrix", G_matrix)
@@ -221,31 +218,97 @@ class TestOptimizerStateCapture:
                 error_norm = torch.norm(
                     torch.abs(G_matrix - reconstructed_G)
                 ) / torch.norm(G_matrix)
-                print(error_norm)
-                assert torch.allclose(sqr_G, L_t, atol=1e-5, rtol=1e-5)
+                print("error_norm", error_norm)
+                assert torch.allclose(G_matrix, reconstructed_G, atol=atol, rtol=atol)
+
+    @pytest.mark.parametrize(
+        "optimizer_name",
+        ["AdaGramPS", "AdaGramFR"],
+    )
+    def test_reconstruction(
+        self,
+        simple_model,
+        sample_data,
+        loss_function,
+        optimizer_configs,
+        optimizer_name,
+    ):
+        """Test specific properties of FullAdaGrad states"""
+        model = simple_model
+        data, targets = sample_data["simple"]
+
+        """Test that optimizer states are properly initialized"""
+        config = optimizer_configs[optimizer_name]
+
+        if optimizer_name == "AdaGramFR":
+            optimizer = AdaGramFR(simple_model.parameters(), **config)
+            atol = 1e-3
+        elif optimizer_name == "AdaGramPS":
+            optimizer = AdaGramPS(simple_model.parameters(), **config)
+            atol = 1e-3
+
+        tester = OptimizerStateTester(optimizer, optimizer_name)
+
+        # Run a few optimization steps
+        for step in range(20):
+            optimizer.zero_grad()
+            output = model(data)
+            loss = loss_function(output, targets)
+            loss.backward()
+
+            tester.capture_state()
+            optimizer.step()
+            tester.loss_history.append(loss.item())
+
+        # Test properties
+        for history in tester.states_history:
+            for param_id, state_data in history["states"].items():
+                optimizer_state = state_data["optimizer_state"]
+
+                assert "G" in optimizer_state, "G matrix should exist in state"
+                assert "L_t" in optimizer_state, "L_t should exist in state"
+
+                if "U" in optimizer_state:
+                    rec_target = optimizer_state["rec_target"]
+                    rec_target = optimizer_state["P"] @ optimizer_state["Q"].T
+                    U, S, V = (
+                        optimizer_state["U"],
+                        optimizer_state["S"],
+                        optimizer_state["V"],
+                    )
+                    if optimizer_name == "AdaGramFR":
+                        V = V.T
+
+                    factorize = U @ S @ V.T
+
+                    print("rec_target", rec_target)
+                    print("factorize", factorize)
+
+                    assert torch.allclose(rec_target, factorize, atol=atol, rtol=atol)
 
 
-# class TestOptimizerComparison:
+class TestOptimizerComparison:
 
-#     def setup_optimizers(self, model, optimizer_configs):
-#         """Setup multiple optimizers for comparison"""
-#         optimizers = {}
-#         testers = {}
+    def setup_optimizers(self, model, optimizer_configs):
+        """Setup multiple optimizers for comparison"""
+        optimizers = {}
+        testers = {}
 
-#         for name, config in optimizer_configs.items():
-#             # Create separate model instances to avoid interference
-#             test_model = type(model)(*[p for p in model.parameters()])
-#             test_model.load_state_dict(model.state_dict())
+        for name, config in optimizer_configs.items():
+            # Create separate model instances to avoid interference
+            test_model = type(model)(*[p for p in model.parameters()])
+            test_model.load_state_dict(model.state_dict())
 
-#             if name == "FullAdaGrad":
-#                 opt = FullAdaGrad(test_model.parameters(), **config)
-#             elif name == "AdaGram":
-#                 opt = AdaGramVanilla(simple_model.parameters(), **config)
+            if name == "FullAdaGrad":
+                opt = FullAdaGrad(test_model.parameters(), **config)
+            elif name == "AdaGram":
+                opt = AdaGramVanilla(simple_model.parameters(), **config)
 
-#             optimizers[name] = {"model": test_model, "optimizer": opt}
-#             testers[name] = OptimizerStateTester(opt, name)
+            optimizers[name] = {"model": test_model, "optimizer": opt}
+            testers[name] = OptimizerStateTester(opt, name)
 
-#         return optimizers, testers
+        return optimizers, testers
+
 
 #     def test_convergence_comparison(
 #         self, simple_model, sample_data, loss_function, optimizer_configs

@@ -50,7 +50,7 @@ class AdaGramFR(AdaGram):
         )
 
     def reduce_rank_svd(
-        self, M: torch.Tensor, max_rank: int = 5
+        self, M: torch.Tensor, max_rank=None
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Reduce rank using SVD decomposition with numerical stability checks
@@ -75,11 +75,14 @@ class AdaGramFR(AdaGram):
         U, S, Vh = torch.linalg.svd(M, full_matrices=False)
 
         # Keep only top max_rank components
-        U_k = U[:, :max_rank]
-        S_k = S[:max_rank]
-        V_k = Vh[:max_rank, :]
+        if max_rank:
+            U_k = U[:, :max_rank]
+            S_k = S[:max_rank]
+            V_k = Vh[:max_rank, :]
 
-        return U_k, S_k, V_k
+            return U_k, S_k, V_k
+        else:
+            return U, S, Vh
 
     def update_PQ(
         self,
@@ -105,6 +108,7 @@ class AdaGramFR(AdaGram):
 
         if "P" not in state:
             # First update - initialize P and Q
+            print("no P case")
             P = beta_g
             Q = g_bar_col
             reconstruct_error = torch.tensor(0.0)
@@ -113,6 +117,7 @@ class AdaGramFR(AdaGram):
             identity = torch.eye(
                 state["Q"].shape[0], device=g_bar.device, dtype=g_bar.dtype
             )
+
             v_upd = ((identity - state["Q"] @ state["P"].T) @ g_bar).reshape(-1, 1)
 
             # Extend matrices
@@ -121,17 +126,26 @@ class AdaGramFR(AdaGram):
             reconstruct_error = torch.tensor(0.0)
 
             # Apply rank reduction if necessary
-            if self.max_rank is not None and P.shape[1] > self.max_rank:
-                rec_target = P @ Q.T
-                U, S, V = self.reduce_rank_svd(rec_target, max_rank=self.max_rank)
+            if (
+                self.max_rank is not None and P.shape[1] >= self.max_rank
+            ) or not self.max_rank:
+                state["rec_target"] = P @ Q.T
+
+                state["U"], state["S"], state["V"] = self.reduce_rank_svd(
+                    state["rec_target"], max_rank=self.max_rank
+                )
+                state["S"] = torch.diag(state["S"])
 
                 # Update P and Q with reduced rank approximation
-                P = U @ torch.diag(S)
-                Q = V.T
+                P = state["U"] @ state["S"]
+                Q = state["V"].T
 
                 # Calculate reconstruction error
                 reconstruct_error = torch.norm(
-                    torch.abs(rec_target - U @ torch.diag(S) @ V)
-                ) / torch.norm(rec_target)
+                    torch.abs(
+                        state["rec_target"] - state["U"] @ state["S"] @ state["V"]
+                    )
+                ) / torch.norm(state["rec_target"])
+                print("reconstruct_error", reconstruct_error)
 
         return P, Q, reconstruct_error

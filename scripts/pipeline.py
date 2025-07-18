@@ -14,6 +14,7 @@ from sklearn.model_selection import train_test_split
 import sys
 import libcontext
 import glob
+from typing import Optional
 import re
 
 from src.adagram_fixed_rank import AdaGramFR
@@ -163,23 +164,26 @@ class ExperimentRunner:
         opt_name: str,
         params,
         lr: float,
-        max_rank: int = None,
+        eps: float,
+        max_rank: Optional[int] = None,
         task: str = "LinReg",
     ):
         """Create optimizer based on configuration"""
         optimizer_map = {
             "AdaGramPS": lambda: AdaGramPS(
-                params=params, lr=lr, max_rank=max_rank, task=task
+                params=params, lr=lr, max_rank=max_rank, task=task, eps=eps
             ),
             "AdaGramFR_svd": lambda: AdaGramFR(
-                params, lr=lr, max_rank=max_rank, task=task
+                params, lr=lr, max_rank=max_rank, task=task, eps=eps
             ),
-            "AdaGramFR_nosvd": lambda: AdaGramFR(params, lr=lr, max_rank=max_rank),
-            "Torch_Adagrad": lambda: torch.optim.Adagrad(params, lr=lr, eps=1e-5),
-            "Shampoo": lambda: Shampoo(params, lr=lr),
-            "FullAdaGrad": lambda: FullAdaGrad(params=params, lr=lr, eps=1e-5),
-            "AdaGram": lambda: AdaGramVanilla(params, lr=lr, eps=1e-4),
-            "Vanilla_SGD": lambda: torch.optim.SGD(params, lr=lr),
+            "AdaGramFR_nosvd": lambda: AdaGramFR(
+                params, lr=lr, max_rank=max_rank, eps=eps
+            ),
+            "Torch_Adagrad": lambda: torch.optim.Adagrad(params, lr=lr, eps=eps),
+            "Shampoo": lambda: Shampoo(params, lr=lr, eps=eps),
+            "FullAdaGrad": lambda: FullAdaGrad(params=params, lr=lr, eps=eps),
+            "AdaGram": lambda: AdaGramVanilla(params, lr=lr, eps=eps),
+            "Vanilla_SGD": lambda: torch.optim.SGD(params, lr=lr, eps=eps),
         }
 
         return optimizer_map[opt_name]()
@@ -195,6 +199,7 @@ class ExperimentRunner:
         y_test,
         opt_name,
         lr,
+        eps,
         r=None,
         data_seed=None,
         task_name=None,
@@ -242,6 +247,7 @@ class ExperimentRunner:
                             "loss": test_loss.item(),
                             "mode": "test",
                             "rank": r,
+                            "eps": eps,
                             "avg_epoch_time": 0,
                             "epoch_time": 0,
                             "batch_size": batch_size,
@@ -254,6 +260,7 @@ class ExperimentRunner:
                             "loss": train_loss.item(),
                             "mode": "train",
                             "rank": r,
+                            "eps": eps,
                             "avg_epoch_time": 0,
                             "epoch_time": 0,
                             "batch_size": batch_size,
@@ -313,6 +320,7 @@ class ExperimentRunner:
                         "loss": test_loss.item(),
                         "mode": "test",
                         "rank": r,
+                        "eps": eps,
                         "avg_epoch_time": avg_epoch_time,
                         "epoch_time": epoch_time,
                         "batch_size": batch_size,
@@ -324,6 +332,7 @@ class ExperimentRunner:
                         "loss": train_loss.item(),
                         "mode": "train",
                         "rank": r,
+                        "eps": eps,
                         "avg_epoch_time": avg_epoch_time,
                         "epoch_time": epoch_time,
                         "batch_size": batch_size,
@@ -371,7 +380,16 @@ class ExperimentRunner:
         df_logs = pd.concat(dfs, ignore_index=True)
         return df_logs
 
-    def plot_results(self, df, name, x="epoch", y="loss", mode="test"):
+    def plot_results(
+        self,
+        df,
+        name,
+        x="epoch",
+        y="loss",
+        mode="test",
+        hue="optimizer",
+        style="optimizer",
+    ):
         """Plot experiment results"""
         plotting_config = self.config.plotting
 
@@ -388,8 +406,8 @@ class ExperimentRunner:
             sns.lineplot,
             x=x,
             y=y,
-            style="optimizer",
-            hue="optimizer",
+            style=style,
+            hue=hue,
             palette=plotting_config["palette"],
             linewidth=plotting_config["linewidth"],
         )
@@ -565,6 +583,7 @@ class ExperimentRunner:
         enabled_tasks = self.config.get("tasks.enabled_tasks")
         learning_rates = self.config.get("training.learning_rates")
         ranks = self.config.get("training.ranks")
+        epsilons = self.config.get("training.eps")
 
         if not data_seeds or not in_dims or not out_dims:
             raise ValueError("data_seeds or dimensions are not defined")
@@ -596,17 +615,64 @@ class ExperimentRunner:
 
                     print(f"Running optimizer: {opt_name}")
 
-                    if not learning_rates or not ranks:
+                    if not learning_rates or not epsilons:
                         raise ValueError("lrs or ranks are not defined")
+                    if not ranks:
+                        ranks = [None]
+                        rank = None
 
                     for lr in learning_rates:
-                        if opt_config["requires_rank"]:
-                            for rank in ranks:
+                        for eps in epsilons:
+                            if opt_config["requires_rank"]:
+                                # if len(ranks) > 0:
+                                for rank in ranks:
+                                    model = self.get_model(
+                                        task_name, in_dims[0], out_dims[0]
+                                    )
+                                    print("rank", rank)
+                                    optimizer = self.get_optimizer(
+                                        opt_name,
+                                        model.parameters(),
+                                        lr=lr,
+                                        eps=eps,
+                                        max_rank=rank,
+                                        task=task_name,
+                                    )
+                                    # else:
+                                    #     model = self.get_model(
+                                    #         task_name, in_dims[0], out_dims[0]
+                                    #     )
+                                    #     optimizer = self.get_optimizer(
+                                    #         opt_name,
+                                    #         model.parameters(),
+                                    #         lr,
+                                    #         eps=eps,
+                                    #         task=task_name,
+                                    #     )
+
+                                    test_loss = self.train_model_stochastic(
+                                        model=model,
+                                        optimizer=optimizer,
+                                        criterion=criterion,
+                                        X_train=X_train,
+                                        y_train=y_train,
+                                        X_test=X_test,
+                                        y_test=y_test,
+                                        opt_name=opt_name,
+                                        lr=lr,
+                                        eps=eps,
+                                        r=rank,
+                                        data_seed=data_seed,
+                                        task_name=task_name,
+                                    )
+                            else:
+                                # if opt_name == "Torch_Adagrad":
+                                #     eps = 1 / eps
                                 model = self.get_model(
                                     task_name, in_dims[0], out_dims[0]
                                 )
                                 optimizer = self.get_optimizer(
-                                    opt_name, model.parameters(), lr, rank, task_name
+                                    opt_name, model.parameters(), lr, eps
                                 )
 
                                 test_loss = self.train_model_stochastic(
@@ -618,45 +684,11 @@ class ExperimentRunner:
                                     X_test=X_test,
                                     y_test=y_test,
                                     opt_name=opt_name,
+                                    eps=eps,
                                     lr=lr,
-                                    r=rank,
                                     data_seed=data_seed,
                                     task_name=task_name,
                                 )
-
-                                print(
-                                    "weight",
-                                    model.state_dict()["linear.weight"].detach(),
-                                )
-
-                                final_parameters[f"{opt_name}_rank_{rank}_lr_{lr}"] = {
-                                    "weights": model.state_dict()["linear.weight"]
-                                    .clone()
-                                    .detach(),
-                                    "bias": model.state_dict()["linear.bias"]
-                                    .clone()
-                                    .detach(),
-                                    "final_loss": test_loss,
-                                }
-                        else:
-                            model = self.get_model(task_name, in_dims[0], out_dims[0])
-                            optimizer = self.get_optimizer(
-                                opt_name, model.parameters(), lr
-                            )
-
-                            test_loss = self.train_model_stochastic(
-                                model=model,
-                                optimizer=optimizer,
-                                criterion=criterion,
-                                X_train=X_train,
-                                y_train=y_train,
-                                X_test=X_test,
-                                y_test=y_test,
-                                opt_name=opt_name,
-                                lr=lr,
-                                data_seed=data_seed,
-                                task_name=task_name,
-                            )
 
                 # Save results
                 df = pd.DataFrame(self.results)
@@ -671,7 +703,9 @@ class ExperimentRunner:
                     raise ValueError("results_dir is None")
 
                 # Plot results
-                # self.plot_results(df, name=filename.replace(".csv", ""))
+                self.plot_results(
+                    df, hue="optimizer", style="eps", name=filename.replace(".csv", "")
+                )
                 # loggs_df = self.make_loggs_df()
                 # self.plot_loggs(data=loggs_df, query_condition="method == vanilla")
 

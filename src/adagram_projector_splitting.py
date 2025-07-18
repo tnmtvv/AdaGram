@@ -81,17 +81,30 @@ class AdaGramPS(AdaGram):
             state["P"] = torch.concat([state["P"], beta_g], dim=1)
             state["Q"] = torch.concat([state["Q"], v_upd], dim=1)
 
-        elif self.max_rank is not None and state["P"].shape[1] >= self.max_rank:
+        elif not self.max_rank or (
+            self.max_rank is not None and state["P"].shape[1] >= self.max_rank
+        ):
             if "U" not in state:
                 state["U"], state["S"], state["V"] = torch.linalg.svd(
                     state["P"] @ state["Q"].T
                 )
-                # state["S"] = torch.diag(state["S"][: self.max_rank])
-                # state["U"] = state["U"][:, : self.max_rank]
-                # state["V"] = state["V"][: self.max_rank, :].T
-                state["S"] = torch.diag(state["S"])
-                state["U"] = state["U"]
-                state["V"] = state["V"].T
+
+                if self.max_rank:
+                    state["U"] = state["U"][:, : self.max_rank]
+                    state["S"] = torch.diag(state["S"][: self.max_rank])
+                    state["V"] = state["V"][: self.max_rank, :].T
+                else:
+                    state["S"] = torch.diag(state["S"])
+                    state["U"] = state["U"]
+                    state["V"] = state["V"].T
+                reconstruct_error = torch.norm(
+                    torch.abs(
+                        state["P"] @ state["Q"].T
+                        - state["U"] @ state["S"] @ state["V"].T
+                    )
+                ) / torch.norm(state["P"] @ state["Q"].T)
+
+                print("first_error", reconstruct_error)
 
             identity = torch.eye(
                 state["P"].shape[0], device=g_bar.device, dtype=g_bar.dtype
@@ -99,17 +112,19 @@ class AdaGramPS(AdaGram):
             update = (
                 beta * torch.ger(g_bar, g_bar) @ (identity - state["P"] @ state["Q"].T)
             )
-            prev_matrix = state["U"] @ state["S"] @ state["V"].T
+            prev_matrix = state["P"] @ state["Q"].T
 
             state["U"], state["S"], state["V"] = self.reduce_rank_psi(
                 update, state["U"], state["S"], state["V"]
-            )
-            cur_matrix = prev_matrix + update
+            )  # here all the matrices are not transposed
+
+            state["rec_target"] = prev_matrix + update
 
             reconstruct_error = torch.norm(
-                torch.abs(cur_matrix - state["U"] @ torch.diag(state["S"]) @ state["V"])
-            ) / torch.norm(cur_matrix)
+                torch.abs(state["rec_target"] - state["U"] @ state["S"] @ state["V"].T)
+            ) / torch.norm(state["rec_target"])
 
             state["P"] = state["U"] @ state["S"]
             state["Q"] = state["V"]
+            print("reconstruct_error", reconstruct_error)
         return state["P"], state["Q"], reconstruct_error

@@ -1,5 +1,6 @@
 import torch
 from torch.optim import Optimizer
+import numpy as np
 
 from typing import Optional, Dict, Any, Tuple
 from abc import ABC, abstractmethod
@@ -81,17 +82,17 @@ class AdaGram(Optimizer, ABC):
         max_rank = self.max_rank
         if not max_rank:
             max_rank = n
-
-        # eps_init = 1e-5
         state["G"] = self.eps * torch.eye(n, device=grad.device, dtype=grad.dtype)
 
-        # eigenvals, eigenvecs = torch.linalg.eigh(state["G"])
-        # sqrt_eigenvals = torch.sqrt(eigenvals)
-        sqr_G = torch.linalg.cholesky(state["G"])
+        chol_G = torch.linalg.cholesky(state["G"])
 
-        state["L_0"] = sqr_G
+        state["L_0"] = (np.sqrt(self.eps)) * torch.eye(
+            n, device=grad.device, dtype=grad.dtype
+        )
+
         state["L_t"] = state["L_0"]
         state["L_0_inv"] = torch.linalg.inv(state["L_0"])
+        print("l_0_inv: \n", state["L_0_inv"])
         state["step_count"] = 0
 
     def update_grad_vector(
@@ -105,11 +106,11 @@ class AdaGram(Optimizer, ABC):
                 grad_vector.shape[0], device=grad_vector.device, dtype=grad_vector.dtype
             )
             g_bar = (
-                # (identity - state["P"] @ state["Q"].T)
-                # @ state["L_0_inv"]
-                # @ grad_vector
-                torch.linalg.inv(state["L_t"])
+                (identity - state["P"] @ state["Q"].T)
+                @ state["L_0_inv"]
                 @ grad_vector
+                # torch.linalg.inv(state["L_t"])
+                # @ grad_vector
             )
         return g_bar
 
@@ -188,6 +189,8 @@ class AdaGram(Optimizer, ABC):
                 )
 
                 # Update L_t
+                # print('state["L_t"]:\n', state["L_t"])
+                # print("cond number of state L", torch.linalg.cond(state["L_t"]))
                 state["L_t"] = state["L_t"] @ (
                     identity + alpha * torch.ger(g_bar, g_bar)
                 )
@@ -196,6 +199,13 @@ class AdaGram(Optimizer, ABC):
 
                 eigenvals, eigenvecs = torch.linalg.eigh(state["G"])
                 sqrt_eigenvals = torch.sqrt(eigenvals)
+
+                # if torch.isnan(sqrt_eigenvals).any():
+                #     if torch.any(eigenvals < self.eps):
+                #         min_eigenval = torch.min(eigenvals)
+                #         print(f"negative_eigenvalue: {min_eigenval.item()}")
+                # print("there is sqrt_eigenval nan")
+
                 sqr_G = eigenvecs @ torch.diag(sqrt_eigenvals) @ eigenvecs.T
 
                 v = torch.randn(n)
@@ -208,7 +218,6 @@ class AdaGram(Optimizer, ABC):
 
                 result = state["L_t"] @ state["L_t"].T
                 target = state["G"]
-
                 error_norm = torch.norm(torch.abs(target - result)) / torch.norm(target)
 
                 # Increment step counter
@@ -229,7 +238,7 @@ class AdaGram(Optimizer, ABC):
                         epoch=epoch,
                     )
 
-                precond_grad = torch.linalg.inv(state["L_t"]) @ grad_vector
+                precond_grad = g_bar / torch.sqrt(1 + g_bar_norm_sq)
                 param_vector.add_(precond_grad, alpha=-group["lr"])
                 p.data = param_vector.reshape(original_shape)
 

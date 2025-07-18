@@ -157,5 +157,6 @@ class FullAdaGrad(Optimizer):
 
                 param_vector.add_(precond_grad, alpha=-group["lr"])
                 p.data = param_vector.reshape(original_shape)
+                state["step_count"] += 1
 
         return loss

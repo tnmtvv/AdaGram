@@ -65,7 +65,7 @@ def check_svd(P, Q, rank):
     print("P_new @ Q_new.T:\n", P_new @ Q_new.T)
     print("P @ Q.T:\n", P @ Q.T)
 
-    assert torch.allclose(torch.abs(P_new @ Q_new.T), torch.abs(P @ Q.T), atol=1e-1)
+    assert torch.allclose(torch.abs(P_new @ Q_new.T), torch.abs(P @ Q.T), atol=1e-3)
 
 
 def check_qr_way(P, Q, rank):
@@ -87,7 +87,7 @@ def check_qr_way(P, Q, rank):
     print("P_new @ Q_new.T:\n", P_new @ Q_new.T)
     print("P @ Q.T:\n", P @ Q.T)
 
-    assert torch.allclose(torch.abs(P_new @ Q_new.T), torch.abs(P @ Q.T), atol=1e-1)
+    assert torch.allclose(torch.abs(P_new @ Q_new.T), torch.abs(P @ Q.T), atol=1e-3)
 
 
 class TestReduceRankPS:
