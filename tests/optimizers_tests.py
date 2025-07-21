@@ -90,7 +90,6 @@ def loss_function():
 def optimizer_configs():
     """Configuration for different optimizers"""
     return {
-        "FullAdaGrad": {"lr": 0.1, "eps": 1e-5},
         "AdaGram": {"lr": 0.1, "eps": 1e-2},
         "AdaGramFR": {"lr": 0.1, "eps": 1e-2, "max_rank": None},
         "AdaGramPS": {"lr": 0.1, "eps": 1e-2, "max_rank": None},
@@ -102,7 +101,6 @@ class TestOptimizerStateCapture:
     @pytest.mark.parametrize(
         "optimizer_name",
         [
-            # "FullAdaGrad",
             "AdaGram",
             "AdaGramPS",
             "AdaGramFR",
@@ -114,9 +112,7 @@ class TestOptimizerStateCapture:
         """Test that optimizer states are properly initialized"""
         config = optimizer_configs[optimizer_name]
 
-        if optimizer_name == "FullAdaGrad":
-            optimizer = FullAdaGrad(simple_model.parameters(), **config)
-        elif optimizer_name == "AdaGram":
+        if optimizer_name == "AdaGram":
             optimizer = AdaGramVanilla(simple_model.parameters(), **config)
         elif optimizer_name == "AdaGramFR":
             optimizer = AdaGramFR(simple_model.parameters(), **config)
@@ -128,7 +124,7 @@ class TestOptimizerStateCapture:
         # Before any steps, state should be empty or have default values
         assert len(tester.states_history) == 0
 
-        # Create dummy gradient
+        # Create gradient
         dummy_input = torch.randn(1, 10)
         dummy_target = torch.randn(1, 1)
         loss = nn.MSELoss()(simple_model(dummy_input), dummy_target)
@@ -146,7 +142,6 @@ class TestOptimizerStateCapture:
     @pytest.mark.parametrize(
         "optimizer_name",
         [
-            # "FullAdaGrad",
             "AdaGram",
             "AdaGramFR",
             "AdaGramPS",
@@ -308,89 +303,3 @@ class TestOptimizerComparison:
             testers[name] = OptimizerStateTester(opt, name)
 
         return optimizers, testers
-
-
-#     def test_convergence_comparison(
-#         self, simple_model, sample_data, loss_function, optimizer_configs
-#     ):
-#         """Compare convergence behavior across optimizers"""
-#         data, targets = sample_data["simple"]
-#         optimizers, testers = self.setup_optimizers(simple_model, optimizer_configs)
-
-#         num_steps = 50
-
-#         for step in range(num_steps):
-#             for name, components in optimizers.items():
-#                 model = components["model"]
-#                 optimizer = components["optimizer"]
-#                 tester = testers[name]
-
-#                 optimizer.zero_grad()
-#                 output = model(data)
-#                 loss = loss_function(output, targets)
-#                 loss.backward()
-
-#                 tester.capture_state()
-#                 tester.loss_history.append(loss.item())
-
-#                 optimizer.step()
-
-#         # Analyze convergence
-#         for name, tester in testers.items():
-#             # Check that loss generally decreases
-#             initial_loss = tester.loss_history[0]
-#             final_loss = tester.loss_history[-1]
-
-#             # Allow for some fluctuation but expect overall improvement
-#             assert final_loss < initial_loss * 1.1, f"{name} did not converge properly"
-
-#             # Check that we have captured states for all steps
-#             assert len(tester.states_history) == num_steps
-
-
-# @pytest.mark.parametrize(
-#     "optimizer_name", ["FullAdaGrad", "AdaGram", "AdaGramFR", "AdaGramPS"]
-# )
-# def test_state_matrix_frobenius_norm(
-#     self, simple_model, sample_data, loss_function, optimizer_configs, optimizer_name
-# ):
-#     """Test Frobenius norm and validity of P and Q matrices for different optimizers"""
-#     data, targets = sample_data["simple"]
-
-#     # Initialize optimizer based on name
-#     config = optimizer_configs[optimizer_name]
-#     if optimizer_name == "FullAdaGrad":
-#         optimizer = FullAdaGrad(simple_model.parameters(), **config)
-#     elif optimizer_name == "AdaGram":
-#         optimizer = AdaGramVanilla(simple_model.parameters(), **config)
-#     elif optimizer_name == "AdaGramFR":
-#         optimizer = AdaGramFR(simple_model.parameters(), **config)
-#     elif optimizer_name == "AdaGramPS":
-#         optimizer = AdaGramPS(simple_model.parameters(), **config)
-#     else:
-#         raise ValueError(f"Unknown optimizer: {optimizer_name}")
-
-#     tester = OptimizerStateTester(optimizer, optimizer_name)
-
-#     # Run optimization steps
-#     for step in range(10):
-#         optimizer.zero_grad()
-#         output = simple_model(data)
-#         loss = loss_function(output, targets)
-#         loss.backward()
-
-#         tester.capture_state()
-#         optimizer.step()
-
-#     # Analyze matrix properties
-#     for history in tester.states_history:
-#         for param_id, state_data in history["states"].items():
-#             P_matrix = state_data["optimizer_state"]["P"]
-#             Q_matrix = state_data["optimizer_state"]["Q"]
-
-#             M = P_matrix @ Q_matrix.T
-
-#             # Check for NaN and infinity values
-#             assert torch.isfinite(
-#                 M
-#             ).any(), f"P matrix for param {param_id} contains NaN or Inf"

@@ -513,13 +513,6 @@ class ExperimentRunner:
                     else:
                         raise ValueError("results_dir is None")
 
-                    # Plot results
-                    # self.plot_results(
-                    #     df, hue="optimizer", style="eps", name=filename.replace(".csv", "")
-                    # )
-                    # loggs_df = self.make_loggs_df()
-                    # self.plot_loggs(data=loggs_df, query_condition="method == vanilla")
-
 
 def main():
     """Main function to run the experiment"""
