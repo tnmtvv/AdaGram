@@ -1,6 +1,7 @@
 import torch
 from torch.optim import Optimizer
 import numpy as np
+import os
 
 from typing import Optional, Dict, Any, Tuple
 from abc import ABC, abstractmethod
@@ -20,6 +21,7 @@ class AdaGram(Optimizer, ABC):
         max_rank: Optional[int] = None,
         log_file: str = "results/adagram_logs.csv",
         task: str = "LinReg",
+        save_dir: str = "matrix_G",
         logger: Optional[AdaGramLogger] = None,
         enable_logging: bool = True,
     ):
@@ -171,12 +173,23 @@ class AdaGram(Optimizer, ABC):
                 # Initialize state if needed
                 if len(state) == 0:
                     self.initialize(state, n, grad)
+                    if (
+                        param_idx == 0
+                    ):  # Save only for first parameter to avoid too many files
+                        filename = f"G_matrix_epoch_0_adagram_task_{getattr(self, 'task_name', 'unknown')}.pt"
+                        torch.save(state["G"], os.path.join(self.save_dir, filename))
 
                 # Update gradient vector
                 g_bar = self.update_grad_vector(state, grad_vector)
 
                 # Update G matrix
                 state["G"] += torch.ger(grad_vector, grad_vector)
+
+                if (
+                    epoch is not None and param_idx == 0
+                ):  # Save only for first parameter to avoid too many files
+                    filename = f"G_matrix_epoch_{epoch+1}_adagram_task_{getattr(self, 'task_name', 'unknown')}.pt"
+                    torch.save(state["G"], os.path.join(self.save_dir, filename))
 
                 # Calculate coefficients
                 g_bar_norm_sq, alpha, beta = self.calculate_coeffs(g_bar)

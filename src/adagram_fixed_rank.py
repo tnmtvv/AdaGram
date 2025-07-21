@@ -146,6 +146,6 @@ class AdaGramFR(AdaGram):
                         state["rec_target"] - state["U"] @ state["S"] @ state["V"]
                     )
                 ) / torch.norm(state["rec_target"])
-                print("reconstruct_error", reconstruct_error)
+                # print("reconstruct_error", reconstruct_error)
 
         return P, Q, reconstruct_error

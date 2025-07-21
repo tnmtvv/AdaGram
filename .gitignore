@@ -163,3 +163,4 @@ cython_debug/
 *.pt
 /notebooks/gradients
 *.npz
+*.png

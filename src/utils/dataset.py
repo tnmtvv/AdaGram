@@ -19,6 +19,10 @@ class Dataset(ABC):
         """
         pass
 
+    @abstractmethod
+    def create_scaled_binary_data_matrix():
+        pass
+
 
 class SparseDataset(Dataset):
     def __init__(
@@ -44,6 +48,23 @@ class SparseDataset(Dataset):
         else:
             X, y = self.create_reg_data()
         return X, y
+
+    def create_scaled_binary_data_matrix(self, scaling_factors=None):
+        """
+        Create scaled dataset using explicit diagonal matrix multiplication.
+        """
+        X, y = self.create_binary_data()
+
+        if scaling_factors is None:
+            scaling_factors = torch.logspace(-2.0, 3.0, self.in_dim)
+
+        # Create diagonal matrix V
+        V = torch.diag(scaling_factors)
+
+        # Apply scaling: X_scaled = X @ V
+        X_scaled = X @ V
+
+        return X, X_scaled, y
 
     def create_binary_data(self):
         """
@@ -141,6 +162,9 @@ class CorrelatedDataset(Dataset):
         super().__init__(n_samples, in_dim, out_dim, noise)
         self.correlation_strength = correlation_strength
 
+    def create_scaled_binary_data_matrix(self):
+        pass
+
     def create_data(self):
         """
         Generate synthetic data with correlated input features.
@@ -185,6 +209,9 @@ class LinearDataset(Dataset):
     def __init__(self, n_samples, in_dim, out_dim=1, seed=100, noise=0.1):
         super().__init__(n_samples, in_dim, out_dim, noise)
 
+    def create_scaled_binary_data_matrix(self):
+        pass
+
     def create_data(self):
         """
         Generate simple linear dataset.
@@ -211,6 +238,9 @@ class LinearDataset(Dataset):
 class NonLinearDataset(Dataset):
     def __init__(self, n_samples, in_dim, out_dim=1, noise=0.1):
         super().__init__(n_samples, in_dim, out_dim, noise)
+
+    def create_scaled_binary_data_matrix(self):
+        pass
 
     def create_data(self):
         """

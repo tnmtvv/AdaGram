@@ -18,6 +18,7 @@ class AdaGramPS(AdaGram):
         weight_decay: float = 0,
         max_rank: Optional[int] = None,
         task: str = "LinReg",
+        save_dir: str = "matrix_G",
         logger: Optional["AdaGramLogger"] = None,
         enable_logging: bool = True,
     ):
@@ -42,9 +43,12 @@ class AdaGramPS(AdaGram):
             weight_decay=weight_decay,
             max_rank=max_rank,
             task=task,
+            save_dir=save_dir,
             logger=logger,
             enable_logging=enable_logging,
         )
+        self.save_dir = save_dir
+        self.task_name = task
 
     def reduce_rank_psi(self, delta_A, U_0, S_0, V_0):
 
@@ -126,5 +130,5 @@ class AdaGramPS(AdaGram):
 
             state["P"] = state["U"] @ state["S"]
             state["Q"] = state["V"]
-            print("reconstruct_error", reconstruct_error)
+            # print("reconstruct_error", reconstruct_error)
         return state["P"], state["Q"], reconstruct_error

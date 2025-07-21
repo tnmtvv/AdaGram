@@ -13,11 +13,11 @@ data:
   
 # Training Configuration
 training:
-  num_epochs: 10
+  num_epochs: 20
   batch_size: 1
-  eps: [0.01]
+  eps: [0.1]
   learning_rates: [0.1]
-  ranks: [null]
+  ranks: [5]
   shuffle: true
   use_tqdm: true
   
@@ -32,17 +32,20 @@ models:
     
 # Optimizer Configuration
 optimizers:
+  KATE:
+    enabled: false
+    requires_rank: false
   AdaGramPS:
     enabled: true
     requires_rank: true
   AdaGramFR_svd:
-    enabled: true
+    enabled: false
     requires_rank: true
   AdaGramFR_nosvd:
     enabled: false
     requires_rank: true
   Torch_Adagrad:
-    enabled: false
+    enabled: true
     requires_rank: false
   Shampoo:
     enabled: false
@@ -51,7 +54,7 @@ optimizers:
     enabled: false
     requires_rank: false
   AdaGram:
-    enabled: true
+    enabled: false
     requires_rank: false
   Vanilla_SGD:
     enabled: false

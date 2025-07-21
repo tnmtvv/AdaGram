@@ -16,12 +16,14 @@ import libcontext
 import glob
 from typing import Optional
 import re
+import copy
 
 from src.adagram_fixed_rank import AdaGramFR
 from src.adagram_vanilla import AdaGramVanilla
 from src.adagram_projector_splitting import AdaGramPS
 from src.shampoo import Shampoo
 from src.full_G import FullAdaGrad
+from src.Kate import KATE
 from src.utils.dataset import SparseDataset, CorrelatedDataset, LinearDataset
 from src.utils.models import (
     LinearRegressionModel,
@@ -171,7 +173,12 @@ class ExperimentRunner:
         """Create optimizer based on configuration"""
         optimizer_map = {
             "AdaGramPS": lambda: AdaGramPS(
-                params=params, lr=lr, max_rank=max_rank, task=task, eps=eps
+                params=params,
+                lr=lr,
+                max_rank=max_rank,
+                task=task,
+                eps=eps,
+                save_dir="matrix_G",
             ),
             "AdaGramFR_svd": lambda: AdaGramFR(
                 params, lr=lr, max_rank=max_rank, task=task, eps=eps
@@ -179,6 +186,7 @@ class ExperimentRunner:
             "AdaGramFR_nosvd": lambda: AdaGramFR(
                 params, lr=lr, max_rank=max_rank, eps=eps
             ),
+            "KATE": lambda: KATE(params, lr=lr, eps=eps),
             "Torch_Adagrad": lambda: torch.optim.Adagrad(params, lr=lr, eps=eps),
             "Shampoo": lambda: Shampoo(params, lr=lr, eps=eps),
             "FullAdaGrad": lambda: FullAdaGrad(params=params, lr=lr, eps=eps),
@@ -200,6 +208,7 @@ class ExperimentRunner:
         opt_name,
         lr,
         eps,
+        X_type,
         r=None,
         data_seed=None,
         task_name=None,
@@ -236,6 +245,23 @@ class ExperimentRunner:
                 train_loss = criterion(y_pred_train, y_train)
                 test_loss = criterion(y_pred_test, y_test)
 
+                with torch.no_grad():
+                    # Apply softmax to convert logits to probabilities
+                    y_pred_probs_train = torch.softmax(y_pred_train, dim=1)
+                    y_pred_probs_test = torch.softmax(y_pred_test, dim=1)
+
+                    # Get predicted class labels
+                    predicted_labels_train = torch.argmax(y_pred_probs_train, dim=1)
+                    predicted_labels_test = torch.argmax(y_pred_probs_test, dim=1)
+
+                    # Calculate accuracy
+                    accuracy_train = (
+                        (predicted_labels_train == y_train).float().mean().item()
+                    )
+                    accuracy_test = (
+                        (predicted_labels_test == y_test).float().mean().item()
+                    )
+
                 r_in_name = f" rank {r}" if r is not None else ""
 
                 self.results.extend(
@@ -245,9 +271,11 @@ class ExperimentRunner:
                             "optimizer": opt_name + r_in_name,
                             "lr": lr,
                             "loss": test_loss.item(),
+                            "accuracy": accuracy_test,
                             "mode": "test",
                             "rank": r,
                             "eps": eps,
+                            "X_type": X_type,
                             "avg_epoch_time": 0,
                             "epoch_time": 0,
                             "batch_size": batch_size,
@@ -258,9 +286,11 @@ class ExperimentRunner:
                             "optimizer": opt_name + r_in_name,
                             "lr": lr,
                             "loss": train_loss.item(),
+                            "accuracy": accuracy_train,
                             "mode": "train",
                             "rank": r,
                             "eps": eps,
+                            "X_type": X_type,
                             "avg_epoch_time": 0,
                             "epoch_time": 0,
                             "batch_size": batch_size,
@@ -305,6 +335,16 @@ class ExperimentRunner:
             train_loss = criterion(y_pred_train, y_train)
             test_loss = criterion(y_pred_test, y_test)
 
+            y_pred_probs_train = torch.softmax(y_pred_train, dim=1)
+            y_pred_probs_test = torch.softmax(y_pred_test, dim=1)
+
+            predicted_labels_train = torch.argmax(y_pred_probs_train, dim=1)
+            predicted_labels_test = torch.argmax(y_pred_probs_test, dim=1)
+
+            # Calculate accuracy
+            accuracy_train = (predicted_labels_train == y_train).float().mean().item()
+            accuracy_test = (predicted_labels_test == y_test).float().mean().item()
+
             elapsed_time = time.time() - time_start
             epoch_time = time.time() - start_epoch
             avg_epoch_time = elapsed_time / (epoch + 1)
@@ -318,9 +358,11 @@ class ExperimentRunner:
                         "optimizer": opt_name + r_in_name,
                         "lr": lr,
                         "loss": test_loss.item(),
+                        "accuracy": accuracy_test,
                         "mode": "test",
                         "rank": r,
                         "eps": eps,
+                        "X_type": X_type,
                         "avg_epoch_time": avg_epoch_time,
                         "epoch_time": epoch_time,
                         "batch_size": batch_size,
@@ -330,9 +372,11 @@ class ExperimentRunner:
                         "optimizer": opt_name + r_in_name,
                         "lr": lr,
                         "loss": train_loss.item(),
+                        "accuracy": accuracy_train,
                         "mode": "train",
                         "rank": r,
                         "eps": eps,
+                        "X_type": X_type,
                         "avg_epoch_time": avg_epoch_time,
                         "epoch_time": epoch_time,
                         "batch_size": batch_size,
@@ -347,234 +391,6 @@ class ExperimentRunner:
 
         return test_loss
 
-    def extract_metadata(self, filename):
-        # Remove directory and extension
-        base = os.path.basename(filename)
-        name, _ = os.path.splitext(base)
-        # Match optimizer and rank (e.g., nosvd_adagram_logs_2)
-        match = re.match(r"([a-zA-Z]+)_adagram_logs_(\d+)", name)
-        if match:
-            optimizer = match.group(1)
-            rank = int(match.group(2))
-        elif name == "adagram_vanila":
-            optimizer = "vanilla"
-            rank = None
-        else:
-            print(name)
-            optimizer = "unknown"
-            rank = None
-        return optimizer, rank
-
-    def make_loggs_df(self):
-        csv_files = glob.glob("results/loggs/*.csv")
-        print(csv_files)
-
-        dfs = []
-        for file in csv_files:
-            df = pd.read_csv(file)
-            optimizer, rank = self.extract_metadata(file)
-            df["method"] = optimizer
-            df["rank"] = rank
-            dfs.append(df)
-
-        df_logs = pd.concat(dfs, ignore_index=True)
-        return df_logs
-
-    def plot_results(
-        self,
-        df,
-        name,
-        x="epoch",
-        y="loss",
-        mode="test",
-        hue="optimizer",
-        style="optimizer",
-    ):
-        """Plot experiment results"""
-        plotting_config = self.config.plotting
-
-        plt.figure(figsize=plotting_config["figure_size"])
-        grid = sns.FacetGrid(
-            data=df.query(f"mode == '{mode}'"),
-            col="lr",
-            height=plotting_config["height"],
-            aspect=plotting_config["aspect"],
-            sharey=True,
-        )
-
-        grid.map_dataframe(
-            sns.lineplot,
-            x=x,
-            y=y,
-            style=style,
-            hue=hue,
-            palette=plotting_config["palette"],
-            linewidth=plotting_config["linewidth"],
-        )
-
-        grid.add_legend()
-
-        in_dims = self.config.get("data.in_dims")
-        out_dims = self.config.get("data.out_dims")
-
-        title = "BinClassification"
-        if in_dims and out_dims:
-            title = f"BinClassification({in_dims[0]}, {out_dims[0]})"
-
-        grid.fig.suptitle(title, fontsize=plotting_config["fontsize"]["title"])
-
-        for ax in grid.axes.flat:
-            ax.set_yscale("log")
-            ax.set_xlabel(
-                ax.get_xlabel(), fontsize=plotting_config["fontsize"]["axis_label"]
-            )
-            ax.set_ylabel(
-                ax.get_ylabel(), fontsize=plotting_config["fontsize"]["axis_label"]
-            )
-
-        grid.set_titles(
-            col_template="lr = {col_name}",
-            fontsize=plotting_config["fontsize"]["legend_title"],
-        )
-
-        plt.tight_layout()
-        plots_dir = self.config.get("output.plots_dir")
-        if plots_dir:
-            plt.savefig(os.path.join(plots_dir, f"{name}.pdf"))
-        plt.show()
-
-    def plot_loggs(
-        self,
-        data,
-        query_condition=None,
-        col_var="param_id",
-        x_var="step",
-        y_var="error_norm",
-        figsize=(15, 8),
-        height=5,
-        aspect=1.2,
-        alpha=0.7,
-        linewidth=1.5,
-        palette="pastel",
-        legend_title="method",
-        legend_title_fontsize=15,
-        legend_fontsize=12,
-        axis_label_fontsize=16,
-        title_fontsize=20,
-        col_template="param_id = {col_name}",
-        suptitle=None,
-        suptitle_fontsize=24,
-        suptitle_y=1.02,
-        log_scale_y=True,
-        sharey=True,
-    ):
-        """
-        Create a faceted line plot using seaborn FacetGrid.
-
-        Parameters:
-        -----------
-        data : pd.DataFrame
-            The input dataframe
-        query_condition : str, optional
-            Query condition to filter data (e.g., "method == 'psi' and rank == 2")
-        col_var : str, default 'param_id'
-            Column variable for faceting
-        x_var : str, default 'step'
-            Variable for x-axis
-        y_var : str, default 'error_norm'
-            Variable for y-axis
-        figsize : tuple, default (15, 8)
-            Figure size
-        height : int, default 5
-            Height of each facet
-        aspect : float, default 1.2
-            Aspect ratio of each facet
-        alpha : float, default 0.7
-            Line transparency
-        linewidth : float, default 1.5
-            Line width
-        palette : str, default 'pastel'
-            Color palette
-        legend_title : str, default 'method'
-            Title for legend
-        legend_title_fontsize : int, default 15
-            Font size for legend title
-        legend_fontsize : int, default 12
-            Font size for legend text
-        axis_label_fontsize : int, default 16
-            Font size for axis labels
-        title_fontsize : int, default 20
-            Font size for subplot titles
-        col_template : str, default "param_id = {col_name}"
-            Template for column titles
-        suptitle : str, optional
-            Super title for the entire figure
-        suptitle_fontsize : int, default 24
-            Font size for super title
-        suptitle_y : float, default 1.02
-            Y position for super title
-        log_scale_y : bool, default True
-            Whether to use log scale for y-axis
-        sharey : bool, default True
-            Whether to share y-axis across subplots
-
-        Returns:
-        --------
-        grid : sns.FacetGrid
-            The FacetGrid object
-        """
-
-        # Filter data if query condition is provided
-        if query_condition:
-            plot_data = data.query(query_condition)
-        else:
-            plot_data = data
-
-        # Create figure
-        plt.figure(figsize=figsize)
-
-        # Create FacetGrid
-        grid = sns.FacetGrid(
-            data=plot_data, col=col_var, height=height, aspect=aspect, sharey=sharey
-        )
-
-        # Map the plotting function
-        grid.map_dataframe(
-            sns.lineplot,
-            x=x_var,
-            y=y_var,
-            palette=palette,
-            alpha=alpha,
-            linewidth=linewidth,
-        )
-
-        # Add legend
-        grid.add_legend(
-            title=legend_title,
-            title_fontsize=legend_title_fontsize,
-            fontsize=legend_fontsize,
-        )
-
-        # Set super title if provided
-        if suptitle:
-            grid.fig.suptitle(suptitle, fontsize=suptitle_fontsize, y=suptitle_y)
-
-        # Customize axes
-        for ax in grid.axes.flat:
-            if log_scale_y:
-                ax.set_yscale("log")
-            ax.set_xlabel(ax.get_xlabel(), fontsize=axis_label_fontsize)
-            ax.set_ylabel(ax.get_ylabel(), fontsize=axis_label_fontsize)
-
-        # Set column titles
-        grid.set_titles(col_template=col_template, fontsize=title_fontsize)
-
-        # Apply tight layout and show
-        plt.tight_layout()
-        plt.show()
-
-        return grid
-
     def run_experiment(self):
         """Run the main experiment"""
         data_seeds = self.config.get("data.data_seeds")
@@ -587,68 +403,87 @@ class ExperimentRunner:
 
         if not data_seeds or not in_dims or not out_dims:
             raise ValueError("data_seeds or dimensions are not defined")
+        base_model = self.get_model("BinClass", in_dims[0], out_dims[0])
 
         for data_seed in data_seeds:
             ds = self.get_dataset(in_dims[0], out_dims[0], data_seed)
-            X, y = ds.create_data()
-
-            print("cond", torch.linalg.cond(X))
-
-            X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=self.config.get("data.test_size"), random_state=42
-            )
-
-            print(f"X_train shape: {X_train.shape}")
-            print(f"y_train shape: {y_train.shape}")
-
-            final_parameters = {}
-
             if not enabled_tasks:
                 raise ValueError
 
             for task_name in enabled_tasks:
-                criterion = self.get_loss_function(task_name)
 
-                for opt_name, opt_config in self.config.optimizers.items():
-                    if not opt_config["enabled"]:
-                        continue
+                X, y = ds.create_binary_data()
 
-                    print(f"Running optimizer: {opt_name}")
+                scaled_dict = {"X true": X}
 
-                    if not learning_rates or not epsilons:
-                        raise ValueError("lrs or ranks are not defined")
-                    if not ranks:
-                        ranks = [None]
-                        rank = None
+                print("cond", torch.linalg.cond(X))
+                for Xtype in scaled_dict.keys():
 
-                    for lr in learning_rates:
-                        for eps in epsilons:
-                            if opt_config["requires_rank"]:
-                                # if len(ranks) > 0:
-                                for rank in ranks:
-                                    model = self.get_model(
-                                        task_name, in_dims[0], out_dims[0]
-                                    )
-                                    print("rank", rank)
+                    X_train, X_test, y_train, y_test = train_test_split(
+                        scaled_dict[Xtype],
+                        y,
+                        test_size=self.config.get("data.test_size"),
+                        random_state=42,
+                    )
+
+                    print(f"X_train shape: {X_train.shape}")
+                    print(f"y_train shape: {y_train.shape}")
+
+                    final_parameters = {}
+
+                    criterion = self.get_loss_function(task_name)
+
+                    for opt_name, opt_config in self.config.optimizers.items():
+                        if not opt_config["enabled"]:
+                            continue
+
+                        print(f"Running optimizer: {opt_name}")
+
+                        if not learning_rates or not epsilons:
+                            raise ValueError("lrs or ranks are not defined")
+                        if not ranks:
+                            ranks = [None]
+                            rank = None
+
+                        for lr in learning_rates:
+                            for eps in epsilons:
+                                if opt_config["requires_rank"]:
+                                    # if len(ranks) > 0:
+                                    for rank in ranks:
+                                        model = copy.deepcopy(base_model)
+                                        print("rank", rank)
+                                        optimizer = self.get_optimizer(
+                                            opt_name,
+                                            model.parameters(),
+                                            lr=lr,
+                                            eps=eps,
+                                            max_rank=rank,
+                                            task=task_name,
+                                        )
+
+                                        test_loss = self.train_model_stochastic(
+                                            model=model,
+                                            optimizer=optimizer,
+                                            criterion=criterion,
+                                            X_train=X_train,
+                                            y_train=y_train,
+                                            X_test=X_test,
+                                            y_test=y_test,
+                                            opt_name=opt_name,
+                                            lr=lr,
+                                            eps=eps,
+                                            X_type=Xtype,
+                                            r=rank,
+                                            data_seed=data_seed,
+                                            task_name=task_name,
+                                        )
+                                else:
+                                    # if opt_name == "Torch_Adagrad":
+                                    #     eps = 1 / eps
+                                    model = copy.deepcopy(base_model)
                                     optimizer = self.get_optimizer(
-                                        opt_name,
-                                        model.parameters(),
-                                        lr=lr,
-                                        eps=eps,
-                                        max_rank=rank,
-                                        task=task_name,
+                                        opt_name, model.parameters(), lr, eps
                                     )
-                                    # else:
-                                    #     model = self.get_model(
-                                    #         task_name, in_dims[0], out_dims[0]
-                                    #     )
-                                    #     optimizer = self.get_optimizer(
-                                    #         opt_name,
-                                    #         model.parameters(),
-                                    #         lr,
-                                    #         eps=eps,
-                                    #         task=task_name,
-                                    #     )
 
                                     test_loss = self.train_model_stochastic(
                                         model=model,
@@ -659,55 +494,31 @@ class ExperimentRunner:
                                         X_test=X_test,
                                         y_test=y_test,
                                         opt_name=opt_name,
-                                        lr=lr,
                                         eps=eps,
-                                        r=rank,
+                                        X_type=Xtype,
+                                        lr=lr,
                                         data_seed=data_seed,
                                         task_name=task_name,
                                     )
-                            else:
-                                # if opt_name == "Torch_Adagrad":
-                                #     eps = 1 / eps
-                                model = self.get_model(
-                                    task_name, in_dims[0], out_dims[0]
-                                )
-                                optimizer = self.get_optimizer(
-                                    opt_name, model.parameters(), lr, eps
-                                )
 
-                                test_loss = self.train_model_stochastic(
-                                    model=model,
-                                    optimizer=optimizer,
-                                    criterion=criterion,
-                                    X_train=X_train,
-                                    y_train=y_train,
-                                    X_test=X_test,
-                                    y_test=y_test,
-                                    opt_name=opt_name,
-                                    eps=eps,
-                                    lr=lr,
-                                    data_seed=data_seed,
-                                    task_name=task_name,
-                                )
+                    # Save results
+                    df = pd.DataFrame(self.results)
+                    df["loss"] = df["loss"].astype(float)
 
-                # Save results
-                df = pd.DataFrame(self.results)
-                df["loss"] = df["loss"].astype(float)
+                    results_dir = self.config.get("output.results_dir")
+                    filename = f"{task_name}_G_matrix_dynamics_{in_dims[0]}_by_{out_dims[0]}.csv"
+                    if results_dir:
+                        filepath = os.path.join(results_dir, filename)
+                        df.to_csv(filepath)
+                    else:
+                        raise ValueError("results_dir is None")
 
-                results_dir = self.config.get("output.results_dir")
-                filename = f"{task_name}_ranks_all_diff_tracking_{in_dims[0]}_by_{out_dims[0]}.csv"
-                if results_dir:
-                    filepath = os.path.join(results_dir, filename)
-                    df.to_csv(filepath)
-                else:
-                    raise ValueError("results_dir is None")
-
-                # Plot results
-                self.plot_results(
-                    df, hue="optimizer", style="eps", name=filename.replace(".csv", "")
-                )
-                # loggs_df = self.make_loggs_df()
-                # self.plot_loggs(data=loggs_df, query_condition="method == vanilla")
+                    # Plot results
+                    # self.plot_results(
+                    #     df, hue="optimizer", style="eps", name=filename.replace(".csv", "")
+                    # )
+                    # loggs_df = self.make_loggs_df()
+                    # self.plot_loggs(data=loggs_df, query_condition="method == vanilla")
 
 
 def main():
