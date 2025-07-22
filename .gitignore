@@ -164,3 +164,7 @@ cython_debug/
 /notebooks/gradients
 *.npz
 *.png
+*.gif
+/scripts/data
+/scripts/matrix_G
+/scripts/matrix_G_pngs

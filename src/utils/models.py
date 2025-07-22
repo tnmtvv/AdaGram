@@ -16,13 +16,14 @@ class LinearRegressionModel(nn.Module):
 
 
 class MultiClassLogisticRegressionModel(nn.Module):
-    def __init__(self, num_classes=2, dim=2):
-        super(MultiClassLogisticRegressionModel, self).__init__()
+    def __init__(self, num_classes=10, dim=784, seed=100):
+        super().__init__()
+        if seed is not None:
+            torch.manual_seed(seed)
         self.linear = nn.Linear(dim, num_classes)
-        self.softmax = nn.Softmax(dim=1)
 
     def forward(self, x):
-        return self.softmax(self.linear(x))
+        return self.linear(x)  # No softmax here!
 
 
 class SimpleClassifier(nn.Module):

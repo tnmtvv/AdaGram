@@ -23,8 +23,13 @@ from src.adagram_vanilla import AdaGramVanilla
 from src.adagram_projector_splitting import AdaGramPS
 from src.shampoo import Shampoo
 from src.full_G import FullAdaGrad
-from src.Kate import KATE
-from src.utils.dataset import SparseDataset, CorrelatedDataset, LinearDataset
+from src.kate import KATE
+from src.utils.dataset import (
+    SparseDataset,
+    CorrelatedDataset,
+    LinearDataset,
+    MNISTDataWrapper,
+)
 from src.utils.models import (
     LinearRegressionModel,
     MultiClassLogisticRegressionModel,
@@ -99,8 +104,6 @@ class ExperimentRunner:
 
         if dataset_type == "SparseDataset":
             if_class = self.config.get("dataset.sparse_config.if_class", False)
-            if if_class is None:
-                raise ValueError("No if class")
             return SparseDataset(
                 n_samples=n_samples,
                 in_dim=in_dim,
@@ -108,6 +111,8 @@ class ExperimentRunner:
                 seed=seed,
                 if_class=if_class,
             )
+        elif dataset_type == "MNIST":
+            return MNISTDataWrapper()
         elif dataset_type == "CorrelatedDataset" and seed:
             correlation = self.config.get("dataset.correlated_config.correlation", 0.8)
             if not correlation:
@@ -207,6 +212,7 @@ class ExperimentRunner:
         y_test,
         opt_name,
         lr,
+        batch_size,
         eps,
         X_type,
         r=None,
@@ -216,10 +222,10 @@ class ExperimentRunner:
         """Train model using stochastic gradient descent"""
 
         num_epochs = self.config.get("training.num_epochs")
-        batch_size = self.config.get("training.batch_size")
         shuffle = self.config.get("training.shuffle")
         use_tqdm = self.config.get("training.use_tqdm")
         grad_save_dir = self.config.get("output.gradients_dir")
+        if_class = self.config.get("dataset.sparse_config.if_class")
 
         if data_seed:
             self.seed_everything(data_seed)
@@ -255,12 +261,16 @@ class ExperimentRunner:
                     predicted_labels_test = torch.argmax(y_pred_probs_test, dim=1)
 
                     # Calculate accuracy
-                    accuracy_train = (
-                        (predicted_labels_train == y_train).float().mean().item()
-                    )
-                    accuracy_test = (
-                        (predicted_labels_test == y_test).float().mean().item()
-                    )
+                    if if_class:
+                        accuracy_train = (
+                            (predicted_labels_train == y_train).float().mean().item()
+                        )
+                        accuracy_test = (
+                            (predicted_labels_test == y_test).float().mean().item()
+                        )
+                    else:
+                        accuracy_test = 0
+                        accuracy_train = 0
 
                 r_in_name = f" rank {r}" if r is not None else ""
 
@@ -342,8 +352,14 @@ class ExperimentRunner:
             predicted_labels_test = torch.argmax(y_pred_probs_test, dim=1)
 
             # Calculate accuracy
-            accuracy_train = (predicted_labels_train == y_train).float().mean().item()
-            accuracy_test = (predicted_labels_test == y_test).float().mean().item()
+            if if_class:
+                accuracy_train = (
+                    (predicted_labels_train == y_train).float().mean().item()
+                )
+                accuracy_test = (predicted_labels_test == y_test).float().mean().item()
+            else:
+                accuracy_train = 0
+                accuracy_test = 0
 
             elapsed_time = time.time() - time_start
             epoch_time = time.time() - start_epoch
@@ -397,6 +413,7 @@ class ExperimentRunner:
         in_dims = self.config.get("data.in_dims")
         out_dims = self.config.get("data.out_dims")
         enabled_tasks = self.config.get("tasks.enabled_tasks")
+        batches = self.config.get("training.batch_size")
         learning_rates = self.config.get("training.learning_rates")
         ranks = self.config.get("training.ranks")
         epsilons = self.config.get("training.eps")
@@ -412,7 +429,7 @@ class ExperimentRunner:
 
             for task_name in enabled_tasks:
 
-                X, y = ds.create_binary_data()
+                X, y = ds.create_data()
 
                 scaled_dict = {"X true": X}
 
@@ -439,26 +456,50 @@ class ExperimentRunner:
 
                         print(f"Running optimizer: {opt_name}")
 
-                        if not learning_rates or not epsilons:
+                        if not learning_rates or not epsilons or not batches:
                             raise ValueError("lrs or ranks are not defined")
                         if not ranks:
                             ranks = [None]
                             rank = None
 
-                        for lr in learning_rates:
-                            for eps in epsilons:
-                                if opt_config["requires_rank"]:
-                                    # if len(ranks) > 0:
-                                    for rank in ranks:
+                        for bs in batches:
+                            for lr in learning_rates:
+                                for eps in epsilons:
+                                    if opt_config["requires_rank"]:
+                                        # if len(ranks) > 0:
+                                        for rank in ranks:
+                                            model = copy.deepcopy(base_model)
+                                            print("rank", rank)
+                                            optimizer = self.get_optimizer(
+                                                opt_name,
+                                                model.parameters(),
+                                                lr=lr,
+                                                eps=eps,
+                                                max_rank=rank,
+                                                task=task_name,
+                                            )
+
+                                            test_loss = self.train_model_stochastic(
+                                                model=model,
+                                                optimizer=optimizer,
+                                                criterion=criterion,
+                                                X_train=X_train,
+                                                y_train=y_train,
+                                                X_test=X_test,
+                                                y_test=y_test,
+                                                opt_name=opt_name,
+                                                lr=lr,
+                                                batch_size=bs,
+                                                eps=eps,
+                                                X_type=Xtype,
+                                                r=rank,
+                                                data_seed=data_seed,
+                                                task_name=task_name,
+                                            )
+                                    else:
                                         model = copy.deepcopy(base_model)
-                                        print("rank", rank)
                                         optimizer = self.get_optimizer(
-                                            opt_name,
-                                            model.parameters(),
-                                            lr=lr,
-                                            eps=eps,
-                                            max_rank=rank,
-                                            task=task_name,
+                                            opt_name, model.parameters(), lr, eps
                                         )
 
                                         test_loss = self.train_model_stochastic(
@@ -470,43 +511,20 @@ class ExperimentRunner:
                                             X_test=X_test,
                                             y_test=y_test,
                                             opt_name=opt_name,
-                                            lr=lr,
                                             eps=eps,
                                             X_type=Xtype,
-                                            r=rank,
+                                            lr=lr,
+                                            batch_size=bs,
                                             data_seed=data_seed,
                                             task_name=task_name,
                                         )
-                                else:
-                                    # if opt_name == "Torch_Adagrad":
-                                    #     eps = 1 / eps
-                                    model = copy.deepcopy(base_model)
-                                    optimizer = self.get_optimizer(
-                                        opt_name, model.parameters(), lr, eps
-                                    )
-
-                                    test_loss = self.train_model_stochastic(
-                                        model=model,
-                                        optimizer=optimizer,
-                                        criterion=criterion,
-                                        X_train=X_train,
-                                        y_train=y_train,
-                                        X_test=X_test,
-                                        y_test=y_test,
-                                        opt_name=opt_name,
-                                        eps=eps,
-                                        X_type=Xtype,
-                                        lr=lr,
-                                        data_seed=data_seed,
-                                        task_name=task_name,
-                                    )
 
                     # Save results
                     df = pd.DataFrame(self.results)
                     df["loss"] = df["loss"].astype(float)
 
                     results_dir = self.config.get("output.results_dir")
-                    filename = f"{task_name}_G_matrix_dynamics_{in_dims[0]}_by_{out_dims[0]}.csv"
+                    filename = f"{task_name}_MNIST_{in_dims[0]}_by_{out_dims[0]}.csv"
                     if results_dir:
                         filepath = os.path.join(results_dir, filename)
                         df.to_csv(filepath)

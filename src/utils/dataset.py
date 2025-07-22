@@ -1,5 +1,6 @@
 import torch
 from abc import ABC, abstractmethod
+from torchvision import datasets, transforms
 
 
 class Dataset(ABC):
@@ -263,4 +264,16 @@ class NonLinearDataset(Dataset):
         if self.out_dim > 1:
             y = y.unsqueeze(1).repeat(1, self.out_dim)
 
+        return X, y
+
+
+class MNISTDataWrapper:
+    def create_data(self):
+        # Returns full training set for compatibility
+        transform = transforms.Compose([transforms.ToTensor()])
+        train_set = datasets.MNIST(
+            root="./data", train=True, download=True, transform=transform
+        )
+        X = train_set.data.view(-1, 28 * 28).float() / 255.0
+        y = train_set.targets
         return X, y

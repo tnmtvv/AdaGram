@@ -21,6 +21,7 @@ class AdaGramPS(AdaGram):
         save_dir: str = "matrix_G",
         logger: Optional["AdaGramLogger"] = None,
         enable_logging: bool = True,
+        save_matrix: bool = False,
     ):
         """
         Initialize AdaGramPS optimizer
@@ -46,6 +47,7 @@ class AdaGramPS(AdaGram):
             save_dir=save_dir,
             logger=logger,
             enable_logging=enable_logging,
+            save_matrix=save_matrix,
         )
         self.save_dir = save_dir
         self.task_name = task

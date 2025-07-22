@@ -23,6 +23,7 @@ class AdaGramFR(AdaGram):
         task: str = "LinReg",
         logger: Optional["AdaGramLogger"] = None,
         enable_logging: bool = True,
+        save_matrix: bool = False,
     ):
         """
         Initialize AdaGramFR optimizer
@@ -47,6 +48,7 @@ class AdaGramFR(AdaGram):
             task=task,
             logger=logger,
             enable_logging=enable_logging,
+            save_matrix=save_matrix,
         )
 
     def reduce_rank_svd(

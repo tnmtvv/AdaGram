@@ -24,6 +24,7 @@ class AdaGram(Optimizer, ABC):
         save_dir: str = "matrix_G",
         logger: Optional[AdaGramLogger] = None,
         enable_logging: bool = True,
+        save_matrix: bool = False,
     ):
         """
         Initialize AdaGram base optimizer
@@ -52,6 +53,7 @@ class AdaGram(Optimizer, ABC):
         self.max_rank = max_rank
         self.task = task
         self.enable_logging = enable_logging
+        self.save_matrix = save_matrix
 
         # Initialize logger
         if enable_logging:
@@ -171,13 +173,17 @@ class AdaGram(Optimizer, ABC):
                 identity = torch.eye(n, device=grad.device, dtype=grad.dtype)
 
                 # Initialize state if needed
+
                 if len(state) == 0:
                     self.initialize(state, n, grad)
-                    if (
-                        param_idx == 0
-                    ):  # Save only for first parameter to avoid too many files
-                        filename = f"G_matrix_epoch_0_adagram_task_{getattr(self, 'task_name', 'unknown')}.pt"
-                        torch.save(state["G"], os.path.join(self.save_dir, filename))
+                    if self.save_matrix:
+                        if (
+                            param_idx == 0
+                        ):  # Save only for first parameter to avoid too many files
+                            filename = f"G_matrix_epoch_0_adagram_task_{getattr(self, 'task_name', 'unknown')}.pt"
+                            torch.save(
+                                state["G"], os.path.join(self.save_dir, filename)
+                            )
 
                 # Update gradient vector
                 g_bar = self.update_grad_vector(state, grad_vector)
@@ -185,11 +191,12 @@ class AdaGram(Optimizer, ABC):
                 # Update G matrix
                 state["G"] += torch.ger(grad_vector, grad_vector)
 
-                if (
-                    epoch is not None and param_idx == 0
-                ):  # Save only for first parameter to avoid too many files
-                    filename = f"G_matrix_epoch_{epoch+1}_adagram_task_{getattr(self, 'task_name', 'unknown')}.pt"
-                    torch.save(state["G"], os.path.join(self.save_dir, filename))
+                if self.save_matrix:
+                    if (
+                        epoch is not None and param_idx == 0
+                    ):  # Save only for first parameter to avoid too many files
+                        filename = f"G_matrix_epoch_{epoch+1}_batch_{state['step_count']}_adagram_task_{getattr(self, 'task_name', 'unknown')}.pt"
+                        torch.save(state["G"], os.path.join(self.save_dir, filename))
 
                 # Calculate coefficients
                 g_bar_norm_sq, alpha, beta = self.calculate_coeffs(g_bar)
@@ -200,24 +207,12 @@ class AdaGram(Optimizer, ABC):
                     beta,
                     g_bar,
                 )
-
-                # Update L_t
-                # print('state["L_t"]:\n', state["L_t"])
-                # print("cond number of state L", torch.linalg.cond(state["L_t"]))
                 state["L_t"] = state["L_t"] @ (
                     identity + alpha * torch.ger(g_bar, g_bar)
                 )
 
-                # sqr_G = torch.linalg.cholesky(state["G"], upper=True)
-
                 eigenvals, eigenvecs = torch.linalg.eigh(state["G"])
                 sqrt_eigenvals = torch.sqrt(eigenvals)
-
-                # if torch.isnan(sqrt_eigenvals).any():
-                #     if torch.any(eigenvals < self.eps):
-                #         min_eigenval = torch.min(eigenvals)
-                #         print(f"negative_eigenvalue: {min_eigenval.item()}")
-                # print("there is sqrt_eigenval nan")
 
                 sqr_G = eigenvecs @ torch.diag(sqrt_eigenvals) @ eigenvecs.T
 
