@@ -15,7 +15,7 @@ class AdaGramVanilla(AdaGram):
         weight_decay: float = 0,
         max_rank: Optional[int] = None,
         task: str = "LinReg",
-        logger: Optional["AdaGramLogger"] = None,
+        logger: Optional["AdaGramLogger"] = False,
         enable_logging: bool = True,
     ):
         """

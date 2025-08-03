@@ -168,3 +168,5 @@ cython_debug/
 /scripts/data
 /scripts/matrix_G
 /scripts/matrix_G_pngs
+*.lprof
+*.prof

@@ -17,6 +17,8 @@ import glob
 from typing import Optional
 import re
 import copy
+import cProfile
+import pstats
 
 from src.adagram_fixed_rank import AdaGramFR
 from src.adagram_vanilla import AdaGramVanilla
@@ -29,12 +31,16 @@ from src.utils.dataset import (
     CorrelatedDataset,
     LinearDataset,
     MNISTDataWrapper,
+    SpliceDataset,
+    HeartDataset,
+    AustralianCreditDataset
 )
 from src.utils.models import (
     LinearRegressionModel,
     MultiClassLogisticRegressionModel,
     SimpleClassifier,
 )
+
 
 
 class Config:
@@ -113,6 +119,12 @@ class ExperimentRunner:
             )
         elif dataset_type == "MNIST":
             return MNISTDataWrapper()
+        elif dataset_type == "AU":
+            return AustralianCreditDataset()
+        elif dataset_type == "Heart":
+            return HeartDataset()
+        elif dataset_type == "Splice":
+            return SpliceDataset()
         elif dataset_type == "CorrelatedDataset" and seed:
             correlation = self.config.get("dataset.correlated_config.correlation", 0.8)
             if not correlation:
@@ -172,10 +184,13 @@ class ExperimentRunner:
         params,
         lr: float,
         eps: float,
+        testing: bool = False,
         max_rank: Optional[int] = None,
         task: str = "LinReg",
     ):
+        
         """Create optimizer based on configuration"""
+        
         optimizer_map = {
             "AdaGramPS": lambda: AdaGramPS(
                 params=params,
@@ -183,20 +198,21 @@ class ExperimentRunner:
                 max_rank=max_rank,
                 task=task,
                 eps=eps,
+                enable_logging= testing,
                 save_dir="matrix_G",
             ),
             "AdaGramFR_svd": lambda: AdaGramFR(
-                params, lr=lr, max_rank=max_rank, task=task, eps=eps
+                params, lr=lr, max_rank=max_rank, task=task, eps=eps, enable_logging= testing,
             ),
             "AdaGramFR_nosvd": lambda: AdaGramFR(
-                params, lr=lr, max_rank=max_rank, eps=eps
+                params, lr=lr, max_rank=max_rank, eps=eps, enable_logging=testing,
             ),
             "KATE": lambda: KATE(params, lr=lr, eps=eps),
             "Torch_Adagrad": lambda: torch.optim.Adagrad(params, lr=lr, eps=eps),
             "Shampoo": lambda: Shampoo(params, lr=lr, eps=eps),
             "FullAdaGrad": lambda: FullAdaGrad(params=params, lr=lr, eps=eps),
-            "AdaGram": lambda: AdaGramVanilla(params, lr=lr, eps=eps),
-            "Vanilla_SGD": lambda: torch.optim.SGD(params, lr=lr, eps=eps),
+            "AdaGram": lambda: AdaGramVanilla(params, lr=lr, eps=eps, enable_logging= testing,),
+            "Vanilla_SGD": lambda: torch.optim.SGD(params, lr=lr),
         }
 
         return optimizer_map[opt_name]()
@@ -238,7 +254,12 @@ class ExperimentRunner:
         epoch_iterator = tqdm(range(num_epochs)) if use_tqdm else range(num_epochs)
         time_start = time.time()
 
+        # max_time = 0.3
+
         for epoch in epoch_iterator:
+            # if time.time > max_time:
+            #     continue
+
             model.train()
             start_epoch = time.time()
             epoch_loss = 0.0
@@ -311,15 +332,15 @@ class ExperimentRunner:
 
             all_grads = {name: [] for name, _ in model.named_parameters()}
 
-            for batch_idx, (batch_X, batch_y) in enumerate(train_loader):
+            for batch_idx, (batch_X, batch_y) in enumerate(tqdm(train_loader, desc='Training')):
                 optimizer.zero_grad()
                 y_pred = model(batch_X)
                 batch_loss = criterion(y_pred, batch_y)
                 batch_loss.backward()
 
-                for name, param in model.named_parameters():
-                    if param.grad is not None:
-                        all_grads[name].append(param.grad.detach().cpu().numpy())
+                # for name, param in model.named_parameters():
+                #     if param.grad is not None:
+                        # all_grads[name].append(param.grad.detach().cpu().numpy())
 
                 if r:
                     optimizer.step(epoch)
@@ -329,16 +350,26 @@ class ExperimentRunner:
                 epoch_loss += batch_loss.item()
                 num_batches += 1
 
-            # Save gradients
-            stacked_grads = {name: np.stack(grads) for name, grads in all_grads.items()}
-            grad_filename = f"{task_name}_{opt_name}_lr{lr}_epoch{epoch}"
-            if r is not None:
-                grad_filename += f"_rank{r}"
-            if grad_save_dir:
-                grad_file = os.path.join(grad_save_dir, f"{grad_filename}_stacked.npz")
-            np.savez_compressed(grad_file, **stacked_grads)
+            # if grad_save_dir:
+            #     # 1. Create the optimizer-specific subdirectory
+            #     optimizer_specific_dir = os.path.join(grad_save_dir, opt_name)
+            #     os.makedirs(optimizer_specific_dir, exist_ok=True)
 
-            # Evaluate
+            #     # 2. Construct a unique filename with all hyperparameter info
+            #     rank_str = f"rank-{r}" if r is not None else "rank-None"
+            #     filename = (
+            #         f"epoch-{epoch+1}_lr-{lr}_eps-{eps}_bs-{batch_size}_"
+            #         f"{rank_str}.npz"
+            #     )
+                
+            #     filepath = os.path.join(optimizer_specific_dir, filename)
+
+            #     # 3. Save the gradients dictionary to a .npy file
+            #     try:
+            #         np.savez_compressed(filepath, **all_grads)
+            #     except Exception as e:
+            #         print(f"Warning: Could not save gradients to {filepath}. Error: {e}")
+
             y_pred_train = model(X_train)
             y_pred_test = model(X_test)
 
@@ -362,7 +393,7 @@ class ExperimentRunner:
                 accuracy_test = 0
 
             elapsed_time = time.time() - time_start
-            epoch_time = time.time() - start_epoch
+            epoch_time = time.time() - time_start # changed to all time
             avg_epoch_time = elapsed_time / (epoch + 1)
 
             r_in_name = f" rank {r}" if r is not None else ""
@@ -413,10 +444,6 @@ class ExperimentRunner:
         in_dims = self.config.get("data.in_dims")
         out_dims = self.config.get("data.out_dims")
         enabled_tasks = self.config.get("tasks.enabled_tasks")
-        batches = self.config.get("training.batch_size")
-        learning_rates = self.config.get("training.learning_rates")
-        ranks = self.config.get("training.ranks")
-        epsilons = self.config.get("training.eps")
 
         if not data_seeds or not in_dims or not out_dims:
             raise ValueError("data_seeds or dimensions are not defined")
@@ -453,6 +480,11 @@ class ExperimentRunner:
                     for opt_name, opt_config in self.config.optimizers.items():
                         if not opt_config["enabled"]:
                             continue
+                    
+                        learning_rates = opt_config.get("learning_rates")
+                        batches = opt_config.get("batch_size")
+                        epsilons = opt_config.get("eps")
+                        ranks = opt_config.get("ranks")
 
                         print(f"Running optimizer: {opt_name}")
 
@@ -461,10 +493,14 @@ class ExperimentRunner:
                         if not ranks:
                             ranks = [None]
                             rank = None
+                        
+                        
 
                         for bs in batches:
                             for lr in learning_rates:
                                 for eps in epsilons:
+                                    pr = cProfile.Profile()
+                                    pr.enable()
                                     if opt_config["requires_rank"]:
                                         # if len(ranks) > 0:
                                         for rank in ranks:
@@ -475,6 +511,7 @@ class ExperimentRunner:
                                                 model.parameters(),
                                                 lr=lr,
                                                 eps=eps,
+                                                testing=opt_config["testing"],
                                                 max_rank=rank,
                                                 task=task_name,
                                             )
@@ -519,12 +556,16 @@ class ExperimentRunner:
                                             task_name=task_name,
                                         )
 
+                                    pr.disable()
+                                    stats = pstats.Stats(pr).strip_dirs().sort_stats("cumulative")
+                                    stats.print_stats(20) 
+
                     # Save results
                     df = pd.DataFrame(self.results)
                     df["loss"] = df["loss"].astype(float)
 
                     results_dir = self.config.get("output.results_dir")
-                    filename = f"{task_name}_MNIST_{in_dims[0]}_by_{out_dims[0]}.csv"
+                    filename = f"{task_name}_Synth_best_params_{in_dims[0]}_by_{out_dims[0]}.csv"
                     if results_dir:
                         filepath = os.path.join(results_dir, filename)
                         df.to_csv(filepath)
@@ -534,7 +575,7 @@ class ExperimentRunner:
 
 def main():
     """Main function to run the experiment"""
-    config = Config("config.yaml")
+    config = Config("configs/config_Synth.yaml")
     runner = ExperimentRunner(config)
     runner.run_experiment()
 

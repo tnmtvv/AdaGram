@@ -8,6 +8,9 @@ from abc import ABC, abstractmethod
 
 from src.utils.Logger import AdaGramLogger
 
+from src.utils.profiler_utils import profile_function
+from line_profiler import profile
+
 
 class AdaGram(Optimizer, ABC):
     """Abstract base class for AdaGram optimizers with pluggable update strategies"""
@@ -23,7 +26,7 @@ class AdaGram(Optimizer, ABC):
         task: str = "LinReg",
         save_dir: str = "matrix_G",
         logger: Optional[AdaGramLogger] = None,
-        enable_logging: bool = True,
+        enable_logging: bool = False,
         save_matrix: bool = False,
     ):
         """
@@ -86,37 +89,50 @@ class AdaGram(Optimizer, ABC):
         max_rank = self.max_rank
         if not max_rank:
             max_rank = n
-        state["G"] = self.eps * torch.eye(n, device=grad.device, dtype=grad.dtype)
+        
+        state["L_0"] = (np.sqrt(self.eps))
 
-        chol_G = torch.linalg.cholesky(state["G"])
-
-        state["L_0"] = (np.sqrt(self.eps)) * torch.eye(
-            n, device=grad.device, dtype=grad.dtype
-        )
-
-        state["L_t"] = state["L_0"]
-        state["L_0_inv"] = torch.linalg.inv(state["L_0"])
-        print("l_0_inv: \n", state["L_0_inv"])
+        if self.enable_logging:
+            state["L_t"] = state["L_0"] * torch.eye(n, device=grad.device, dtype=grad.dtype)
+        state["L_0_inv"] = 1 / state["L_0"]
         state["step_count"] = 0
 
-    def update_grad_vector(
-        self, state: Dict[str, Any], grad_vector: torch.Tensor
-    ) -> torch.Tensor:
-        """Update gradient vector with preconditioning"""
-        if "P" not in state:
-            g_bar = state["L_0_inv"] @ grad_vector
+    # def update_grad_vector(
+    #     self, state: Dict[str, Any], grad_vector: torch.Tensor
+    # ) -> torch.Tensor:
+    #     """Update gradient vector with preconditioning"""
+    #     if "P" not in state:
+    #         g_bar = state["L_0_inv"] @ grad_vector
+    #     else:
+    #         identity = torch.eye(
+    #             grad_vector.shape[0], device=grad_vector.device, dtype=grad_vector.dtype
+    #         )
+    #         g_bar = (
+    #             (identity - state["P"] @ state["Q"].T)
+    #             @ state["L_0_inv"]
+    #             @ grad_vector
+    #         )
+    #     return g_bar
+
+    def update_grad_vector(self, state, grad_vector):
+        d = state["L_0_inv"]  # 1D tensor, diagonal entries
+        u = grad_vector.mul_(d)   # elementwise
+
+        if "P" in state:
+            P, Q = state["P"], state["Q"]
+            if len(u.shape) == 1:
+                u = u.view(-1, 1)
+            x = Q.T @ u   # shape: (q_dim,)
+            if len(x.shape) > 0:
+                Px = P @ x    # shape: (n_dim,)
+            else: 
+                Px = P * x
+            new_g_bar = (u - Px).reshape(-1)
+            return new_g_bar
         else:
-            identity = torch.eye(
-                grad_vector.shape[0], device=grad_vector.device, dtype=grad_vector.dtype
-            )
-            g_bar = (
-                (identity - state["P"] @ state["Q"].T)
-                @ state["L_0_inv"]
-                @ grad_vector
-                # torch.linalg.inv(state["L_t"])
-                # @ grad_vector
-            )
-        return g_bar
+            new_g_bar = u.reshape(-1)
+            return u
+
 
     def calculate_coeffs(
         self, g_bar: torch.Tensor
@@ -127,7 +143,7 @@ class AdaGram(Optimizer, ABC):
         beta = self._compute_beta(alpha, g_bar_norm_sq)
         return g_bar_norm_sq, alpha, beta
 
-    @abstractmethod
+    # @abstractmethod
     def update_PQ(
         self,
         state: Dict[str, Any],
@@ -149,6 +165,7 @@ class AdaGram(Optimizer, ABC):
         """
         pass
 
+    @profile
     def step(self, epoch: Optional[int] = None, closure=None):
         """Performs a single optimization step"""
         loss = None
@@ -170,13 +187,12 @@ class AdaGram(Optimizer, ABC):
                 if torch.isnan(grad_vector).any():
                     print("grad_vector", torch.linalg.norm(grad_vector))
 
-                identity = torch.eye(n, device=grad.device, dtype=grad.dtype)
-
+                
                 # Initialize state if needed
 
                 if len(state) == 0:
                     self.initialize(state, n, grad)
-                    if self.save_matrix:
+                    if self.enable_logging and self.save_matrix:
                         if (
                             param_idx == 0
                         ):  # Save only for first parameter to avoid too many files
@@ -189,9 +205,12 @@ class AdaGram(Optimizer, ABC):
                 g_bar = self.update_grad_vector(state, grad_vector)
 
                 # Update G matrix
-                state["G"] += torch.ger(grad_vector, grad_vector)
+                if self.enable_logging:
+                    if "G" not in state:
+                        state["G"] = self.eps * torch.eye(n, device=grad.device, dtype=grad.dtype)
+                    state["G"] += torch.ger(grad_vector, grad_vector)
 
-                if self.save_matrix:
+                if self.enable_logging and self.save_matrix:
                     if (
                         epoch is not None and param_idx == 0
                     ):  # Save only for first parameter to avoid too many files
@@ -207,26 +226,30 @@ class AdaGram(Optimizer, ABC):
                     beta,
                     g_bar,
                 )
-                state["L_t"] = state["L_t"] @ (
-                    identity + alpha * torch.ger(g_bar, g_bar)
-                )
 
-                eigenvals, eigenvecs = torch.linalg.eigh(state["G"])
-                sqrt_eigenvals = torch.sqrt(eigenvals)
+                if self.enable_logging:
+                    identity = torch.eye(n, device=grad.device, dtype=grad.dtype)
 
-                sqr_G = eigenvecs @ torch.diag(sqrt_eigenvals) @ eigenvecs.T
+                    state["L_t"] = state["L_t"] @ (
+                        identity + alpha * torch.ger(g_bar, g_bar)
+                    )
 
-                v = torch.randn(n)
-                v = v / torch.norm(v)
+                    eigenvals, eigenvecs = torch.linalg.eigh(state["G"])
+                    sqrt_eigenvals = torch.sqrt(eigenvals)
 
-                y_1 = sqr_G @ v
-                y_2 = state["L_t"] @ v
+                    sqr_G = eigenvecs @ torch.diag(sqrt_eigenvals) @ eigenvecs.T
 
-                error_norm_sqr = torch.norm(y_1 - y_2) / torch.norm(y_1)
+                    v = torch.randn(n)
+                    v = v / torch.norm(v)
 
-                result = state["L_t"] @ state["L_t"].T
-                target = state["G"]
-                error_norm = torch.norm(torch.abs(target - result)) / torch.norm(target)
+                    y_1 = sqr_G @ v
+                    y_2 = state["L_t"] @ v
+
+                    error_norm_sqr = torch.norm(y_1 - y_2) / torch.norm(y_1)
+
+                    result = state["L_t"] @ state["L_t"].T
+                    target = state["G"]
+                    error_norm = torch.norm(torch.abs(target - result)) / torch.norm(target)
 
                 # Increment step counter
                 state["step_count"] += 1

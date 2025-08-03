@@ -1,7 +1,13 @@
 import torch
 from abc import ABC, abstractmethod
 from torchvision import datasets, transforms
+from ucimlrepo import fetch_ucirepo
 
+
+import os
+import pandas as pd
+import torch
+from sklearn.datasets import fetch_openml
 
 class Dataset(ABC):
     def __init__(self, n_samples, in_dim, out_dim=1, noise=0.1):
@@ -23,6 +29,109 @@ class Dataset(ABC):
     @abstractmethod
     def create_scaled_binary_data_matrix():
         pass
+
+DATA_DIR = "./data"
+
+class HeartDataset:
+
+    HEART_FILENAME = os.path.join(DATA_DIR, "heart.csv")
+    HEART_URL = "https://archive.ics.uci.edu/ml/machine-learning-databases/heart-disease/processed.cleveland.data"
+
+    def get_heart_csv(self):
+        if not os.path.exists(self.HEART_FILENAME):
+            os.makedirs(DATA_DIR, exist_ok=True)
+            print("Downloading Heart dataset...")
+            cols = [  # columns from the UCI file
+                "age",
+                "sex",
+                "cp",
+                "trestbps",
+                "chol",
+                "fbs",
+                "restecg",
+                "thalach",
+                "exang",
+                "oldpeak",
+                "slope",
+                "ca",
+                "thal",
+                "target",
+            ]
+            df = pd.read_csv(self.HEART_URL, names=cols, na_values="?")
+            # Clean missing values
+            df = df.dropna().reset_index(drop=True)
+            df.to_csv(self.HEART_FILENAME, index=False)
+        return pd.read_csv(self.HEART_FILENAME)
+
+    def create_data(self):
+        df = self.get_heart_csv()
+        # Make binary labels: according to UCI, 'target'==0 as healthy, >0 as unhealthy
+        X = df.iloc[:, :-1].values.astype(float)
+        y = (df["target"].values > 0).astype(int).astype(int)
+        return torch.tensor(X, dtype=torch.float32), torch.tensor(y, dtype=torch.long)
+
+
+#########################################
+# Australian Credit (OpenML or LIBSVM)  #
+#########################################
+
+
+class AustralianCreditDataset:
+    def get_csv(self):
+        DATA_FILENAME = os.path.join(DATA_DIR, "australian.csv")
+        if not os.path.exists(DATA_FILENAME):
+            os.makedirs(DATA_DIR, exist_ok=True)
+            print("Downloading dataset from OpenML...")
+            data = fetch_openml(data_id=40509, as_frame=True)
+            df = data.frame
+            df.to_csv(DATA_FILENAME, index=False)
+        return pd.read_csv(DATA_FILENAME)
+
+    def create_data(self):
+        df = self.get_csv()
+        X = df.iloc[:, 1:]
+        X = pd.get_dummies(X)  # ensures all features are numeric
+
+        y = df.iloc[:, 1]
+        y, uniques = pd.factorize(y)  # makes target integer 0, 1, ...
+
+        print(X.shape)
+        print(y.shape)
+        # CORRECTION: specify dtype=torch.long for classification targets!
+        return torch.tensor(X.values, dtype=torch.float32), torch.tensor(
+            y, dtype=torch.long
+        )
+
+
+############################
+# Splice Dataset (UCI)     #
+############################
+
+
+class SpliceDataset:
+    def __init__(self, n_samples=None):
+        self.n_samples = n_samples
+        self.splicedata = fetch_ucirepo(id=69)
+
+    def get_csv(self):
+        # You can customize this to return a DataFrame for your pipeline logic
+        X = self.splicedata.data.features
+        y = self.splicedata.data.targets
+        df = X.copy()
+        df['target'] = y
+        if self.n_samples:
+            df = df.iloc[:self.n_samples]
+        return df
+
+    def create_data(self):
+        df = self.get_csv()
+        # column 'target' is the label, rest are features
+        X = df.drop(columns=['target'])
+        X = pd.get_dummies(X)  # One-hot for categorical features (usually needed for tabular data)
+        y, uniques = pd.factorize(df['target'])
+        print(X.shape)
+        print(y.shape)
+        return torch.tensor(X.values, dtype=torch.float32), torch.tensor(y, dtype=torch.long)
 
 
 class SparseDataset(Dataset):

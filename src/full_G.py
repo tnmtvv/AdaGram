@@ -29,7 +29,7 @@ class FullAdaGrad(Optimizer):
 
         self.log_file = log_file
 
-        self._initialize_csv()
+        # self._initialize_csv()
         self.eps = eps
 
     def _initialize_csv(self):

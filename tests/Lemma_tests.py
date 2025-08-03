@@ -60,7 +60,7 @@ def test_pq_Lt_vs_gt_Lt(dim, n_steps):
     G = eps * torch.eye(dim)
     L_0 = torch.linalg.cholesky(G, upper=False)
     # L_0 = eps * torch.eye(dim)
-    print("L_0", L_0)
+    # print("L_0", L_0)
     L_0_inv = torch.linalg.inv(L_0)
     P = None
     Q = None

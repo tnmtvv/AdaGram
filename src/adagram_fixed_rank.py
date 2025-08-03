@@ -8,6 +8,7 @@ import numpy as np
 from typing import Optional, Dict, Any, Tuple
 
 from src.adagram_base import AdaGram, AdaGramLogger
+from line_profiler import profile
 
 
 class AdaGramFR(AdaGram):
@@ -50,7 +51,7 @@ class AdaGramFR(AdaGram):
             enable_logging=enable_logging,
             save_matrix=save_matrix,
         )
-
+    @profile
     def reduce_rank_svd(
         self, M: torch.Tensor, max_rank=None
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -85,7 +86,7 @@ class AdaGramFR(AdaGram):
             return U_k, S_k, V_k
         else:
             return U, S, Vh
-
+    @profile
     def update_PQ(
         self,
         state: Dict[str, Any],
@@ -125,6 +126,7 @@ class AdaGramFR(AdaGram):
             # Extend matrices
             P = torch.cat([state["P"], beta_g], dim=1)
             Q = torch.cat([state["Q"], v_upd], dim=1)
+
             reconstruct_error = torch.tensor(0.0)
 
             # Apply rank reduction if necessary
@@ -143,11 +145,12 @@ class AdaGramFR(AdaGram):
                 Q = state["V"].T
 
                 # Calculate reconstruction error
-                reconstruct_error = torch.norm(
-                    torch.abs(
-                        state["rec_target"] - state["U"] @ state["S"] @ state["V"]
-                    )
-                ) / torch.norm(state["rec_target"])
+                if self.enable_logging:
+                    reconstruct_error = torch.norm(
+                        torch.abs(
+                            state["rec_target"] - state["U"] @ state["S"] @ state["V"]
+                        )
+                    ) / torch.norm(state["rec_target"])
                 # print("reconstruct_error", reconstruct_error)
 
         return P, Q, reconstruct_error
