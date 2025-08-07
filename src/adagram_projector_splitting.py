@@ -148,7 +148,7 @@ class AdaGramPS(AdaGram):
         g_bar_col = g_bar.reshape(-1, 1)
         g_bar_row = g_bar.reshape(1, -1)
 
-        reconstruct_error = torch.tensor(0)
+        reconstruct_error = torch.tensor(0, device=g_bar.device, dtype=g_bar.dtype)
 
         if "P" not in state:
             # print("here")

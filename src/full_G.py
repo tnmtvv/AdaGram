@@ -148,7 +148,8 @@ class FullAdaGrad(Optimizer):
                 state["G"] += torch.ger(grad_vector, grad_vector)
 
                 eigenvals, eigenvecs = torch.linalg.eigh(state["G"])
-                sqrt_eigenvals = torch.sqrt(eigenvals)
+                clamped_eigenvals = torch.clamp(eigenvals, min=0.0)
+                sqrt_eigenvals = torch.sqrt(clamped_eigenvals + 0.0001)
                 sqr_G = eigenvecs @ torch.diag(sqrt_eigenvals) @ eigenvecs.T
                 # print("eigenvals", eigenvals)
                 # sqrt_G = torch.linalg.cholesky(state["G"])

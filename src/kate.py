@@ -9,7 +9,7 @@ class KATE(torch.optim.Optimizer):  # delta 0 or 1e-8
         eta=0.9,
         eps=1e-8,
         weight_decay=0,
-        device="cpu",
+        device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
     ):  # lr=1e-3, eta=0.9, eps=1e-8, delta=0, weight_decay=0):
         defaults = dict(
             device=device,

@@ -2,6 +2,7 @@ import torch
 from abc import ABC, abstractmethod
 from torchvision import datasets, transforms
 from ucimlrepo import fetch_ucirepo
+import numpy as np
 
 
 import os
@@ -9,28 +10,305 @@ import pandas as pd
 import torch
 from sklearn.datasets import fetch_openml
 
+
 class Dataset(ABC):
-    def __init__(self, n_samples, in_dim, out_dim=1, noise=0.1):
+    """
+    Abstract base class for generating synthetic datasets.
+    """
+    def __init__(self, n_samples, in_dim, out_dim=1, noise=0.1, seed=42):
+        if in_dim < 2:
+            raise ValueError("in_dim must be at least 2 for this logic.")
+        
         self.n_samples = n_samples
         self.in_dim = in_dim
-        self.out_dim = out_dim
         self.noise = noise
+        self.rng = np.random.RandomState(seed)
+        # Using the provided weight creation strategy which is excellent
+        # for creating a complex, non-axis-aligned problem.
+        # self.true_weights_mask = self._create_weight_mask()
+        self.true_weights_mask =  self.rng.randn(in_dim, 1)
+
+    def _create_weight_mask(self, anisotropy_ratio=1e4, seed=42):
+        """Creates the ground-truth weight vector that defines the problem."""
+        rng = np.random.default_rng(seed)
+
+        # 1. Create a set of anisotropic "principal" weight magnitudes
+        # The magnitudes are log-spaced to create a strong anisotropic effect.
+        principal_weights = np.logspace(0, np.log10(anisotropy_ratio), self.in_dim)
+        principal_weights *= rng.choice([-1, 1], size=self.in_dim)
+
+        # 2. Create a random rotation matrix to introduce correlation
+        random_matrix = rng.standard_normal(size=(self.in_dim, self.in_dim))
+        rotation_matrix, _ = np.linalg.qr(random_matrix)
+
+        # 3. Apply the rotation to create the final correlated weight vector
+        correlated_weights = rotation_matrix @ principal_weights
+        return correlated_weights.reshape(-1, 1)
 
     @abstractmethod
     def create_data(self):
         """
-        Create dataset with consistent interface.
-
-        Returns:
-            tuple: (X, y) where X is input data and y is target data
+        Each child class must implement this to return X and y as NumPy arrays.
         """
         pass
 
-    @abstractmethod
-    def create_scaled_binary_data_matrix():
-        pass
+    def _generate_labels(self, X):
+        """
+        Helper function to generate logistic regression labels from features and true weights.
+        
+        This is the main corrected part.
+        """
+        # 1. Calculate the linear combination (logits)
+        logits = X @ self.true_weights_mask
+        
+        # 2. Apply the sigmoid function to get probabilities
+        # A numerically stable sigmoid can be used, but for this problem,
+        # large logit values are part of the design.
+        sigmoid = lambda z: 1 / (1 + np.exp(-z))
+        probabilities = sigmoid(logits)
+        
+        # 3. Generate binary outcomes from a Bernoulli distribution
+        # This is done by comparing the probabilities to a uniform random number.
+        y = (self.rng.uniform(size=probabilities.shape) < probabilities).astype(np.int64).flatten()
+        return y
 
-DATA_DIR = "./data"
+    def get_data_for_analysis(self):
+        """
+        A helper method to get X as a pandas DataFrame and y as a numpy array.
+        """
+        X_np, y_np = self.create_data()
+        feature_names = [f'feature_{i}' for i in range(self.in_dim)]
+        X_df = pd.DataFrame(X_np, columns=feature_names)
+        return X_df, y_np
+
+class LogisticAnisotropicDataset(Dataset):
+    """
+    A concrete implementation that generates a dataset with correlated features,
+    which is the key to creating an anisotropic loss landscape for logistic regression.
+    """
+    def create_data(self, anisotropy_ratio=1e3):
+        # 1. Start with uncorrelated data
+        Z = self.rng.standard_normal(size=(self.n_samples, self.in_dim))
+
+        # 2. Create a tridiagonal matrix T
+        #    - Main diagonal of 1s
+        #    - Off-diagonals of 0.5 to create local correlation
+        T = np.zeros((self.in_dim, self.in_dim))
+        
+        # Set the main diagonal
+        diag_values = np.logspace(0, np.log10(anisotropy_ratio), self.in_dim)
+        np.fill_diagonal(T, diag_values)
+        
+        # Set the upper and lower diagonals
+        # We use slicing to handle the arrays of length (in_dim - 1)
+        upper_diag = T.diagonal(offset=1)
+        upper_diag.setflags(write=True)
+        # upper_vals = np.logspace(0, np.log10(1e2), self.in_dim - 1)
+        upper_diag.fill(0.5)
+
+        lower_diag = T.diagonal(offset=-1)
+        lower_diag.setflags(write=True)
+        # lower_vals = np.logspace(0, np.log10(1e2), self.in_dim - 1)
+        # lower_diag[:] = lower_vals
+        lower_diag.fill(0.7)
+
+        # 3. Apply the transformation to create locally correlated features
+        X = Z @ T
+
+        # 4. Generate the probabilistic logistic regression labels
+        y = self._generate_labels(X)
+
+        return torch.tensor(X, dtype=torch.float32), torch.tensor(y.reshape(-1), dtype=torch.long)
+
+# --- Child Classes (Now Simpler) ---
+
+class IsotropicDataset(Dataset):
+    """Generates an Uncorrelated, Isotropic dataset."""
+    def create_data_numpy(self):
+        cov_matrix = np.eye(self.in_dim)
+        X = self.rng.multivariate_normal(mean=np.zeros(self.in_dim), cov=cov_matrix, size=self.n_samples)
+        y = self._generate_labels(X)
+        return X, y
+
+class AnisotropicDataset(Dataset):
+    """Generates an Uncorrelated, Anisotropic dataset."""
+    def create_data_numpy(self, anisotropy_ratio=1e3):
+        variances = np.logspace(0, np.log10(anisotropy_ratio), self.in_dim)
+        cov_matrix = np.diag(variances)
+        X = self.rng.multivariate_normal(mean=np.zeros(self.in_dim), cov=cov_matrix, size=self.n_samples)
+        y = self._generate_labels(X)
+        return X, y
+
+class CorrelatedAnisotropicDataset(Dataset):
+    """Generates a Correlated, Anisotropic dataset."""
+    def create_data_numpy(self, anisotropy_ratio=1e3):
+        variances = np.logspace(0, np.log10(anisotropy_ratio), self.in_dim)
+        anisotropic_cov = np.diag(variances)
+        random_matrix = self.rng.randn(self.in_dim, self.in_dim)
+        rotation_matrix, _ = np.linalg.qr(random_matrix)
+        correlated_cov = rotation_matrix @ anisotropic_cov @ rotation_matrix.T
+        X = self.rng.multivariate_normal(mean=np.zeros(self.in_dim), cov=correlated_cov, size=self.n_samples)
+        y = self._generate_labels(X)
+        return X, y
+
+
+class StudentPerformanceDataset:
+    """
+    Loads the Student Performance dataset from the UCI repository.
+    This is a REGRESSION task to predict the final grade (G3).
+    """
+    def get_data(self):
+        """Downloads and caches the dataset, returns pandas DataFrame."""
+        DATASET_NAME = "student_performance"
+        DATA_FILENAME = os.path.join(DATA_DIR, f"{DATASET_NAME}.csv")
+        
+        if not os.path.exists(DATA_FILENAME):
+            os.makedirs(DATA_DIR, exist_ok=True)
+            print(f"Downloading {DATASET_NAME} dataset from UCI...")
+            # Dataset ID for Student Performance is 320
+            dataset = fetch_ucirepo(id=320)
+            df = pd.concat([dataset.data.features, dataset.data.targets], axis=1)
+            df.to_csv(DATA_FILENAME, index=False)
+            
+        return pd.read_csv(DATA_FILENAME)
+
+    def create_data(self):
+        """Processes the dataframe and returns PyTorch tensors."""
+        df = self.get_data()
+
+        # The target variable is 'G3' (final grade)
+        X = df.drop("G3", axis=1)
+        y = df["G3"]
+
+        # 1. Explicitly identify categorical and numerical feature columns
+        categorical_cols = X.select_dtypes(include=['object']).columns
+        numerical_cols = X.select_dtypes(include=['number']).columns
+
+        # 2. Apply one-hot encoding to the categorical columns
+        # Using dtype=float ensures the new columns are floats, not booleans/integers
+        X_categorical = pd.get_dummies(
+            X[categorical_cols], 
+            drop_first=True,  # Avoids multicollinearity
+            dtype=float
+        )
+
+        # 3. Get the original numerical features
+        X_numerical = X[numerical_cols]
+
+        # 4. Concatenate the numerical features and the new one-hot encoded features
+        X = pd.concat([X_numerical, X_categorical], axis=1)
+
+        print("\nStudent Performance Shapes:")
+        print("Features (X):", X.shape)
+        print("Target   (y):", y.shape)
+
+        # 5. Convert to float32 tensors. 
+        # Since X is now guaranteed to be fully numeric, this will work reliably.
+        return torch.tensor(X.values, dtype=torch.float32), torch.tensor(
+            y.values.reshape(-1, 1), dtype=torch.float32
+        )
+
+DATA_DIR  = "./data"
+
+class AIDSDataset:
+    """
+    Loads the AIDS Clinical Trials Group Study 175 dataset from UCI.
+    This is set up for a REGRESSION task to predict 'time' (time to failure/censoring).
+    """
+    def get_data(self):
+        """Downloads and caches the dataset, returns pandas DataFrame."""
+        DATASET_NAME = "aids_clinical_trials"
+        DATA_FILENAME = os.path.join(DATA_DIR, f"{DATASET_NAME}.csv")
+        
+        if not os.path.exists(DATA_FILENAME):
+            os.makedirs(DATA_DIR, exist_ok=True)
+            print(f"Downloading {DATASET_NAME} dataset from UCI...")
+            # Dataset ID is 890
+            dataset = fetch_ucirepo(id=890)
+            df = pd.concat([dataset.data.features, dataset.data.targets], axis=1)
+            df.to_csv(DATA_FILENAME, index=False)
+            
+        return pd.read_csv(DATA_FILENAME)
+
+    def create_data(self):
+        """Processes the dataframe and returns PyTorch tensors."""
+        df = self.get_data()
+        
+        # Target for regression: 'time' to failure or censoring
+        # Features: All other columns except the classification target ('cid')
+        # 'pidnum' is already excluded by fetch_ucirepo as it's an ID column.
+        
+        # FIX: Remove 'pidnum' from the drop list as it's not in the DataFrame.
+        X = df.drop(["time", "cid"], axis=1)
+        y = df["time"]
+        
+        # Note: Features are already numeric (binary or integer). No one-hot encoding needed.
+        
+        print("\nAIDS Clinical Trials Shapes (Regression on 'time'):")
+        print("Features (X):", X.shape)
+        print("Target   (y):", y.shape)
+    
+        # Convert to float32 tensors
+        return torch.tensor(X.values, dtype=torch.float32), torch.tensor(
+            y.values.reshape(-1, 1), dtype=torch.float32
+        )
+        
+class CommunitiesAndCrimeDataset:
+    """
+    Loads the Communities and Crime dataset from the UCI repository.
+    This is a REGRESSION task to predict violent crime rates.
+    This dataset contains missing values that need to be handled.
+    """
+    def get_data(self):
+        """Downloads and caches the dataset, returns pandas DataFrame."""
+        DATASET_NAME = "communities_and_crime"
+        DATA_FILENAME = os.path.join(DATA_DIR, f"{DATASET_NAME}.csv")
+
+        if not os.path.exists(DATA_FILENAME):
+            os.makedirs(DATA_DIR, exist_ok=True)
+            print(f"Downloading {DATASET_NAME} dataset from UCI...")
+            # Dataset ID is 183
+            dataset = fetch_ucirepo(id=183)
+            df = pd.concat([dataset.data.features, dataset.data.targets], axis=1)
+            df.to_csv(DATA_FILENAME, index=False)
+
+        return pd.read_csv(DATA_FILENAME)
+
+    def create_data(self):
+        """Processes the dataframe and returns PyTorch tensors."""
+        df = self.get_data()
+
+        # 1. Replace the non-numeric '?' with NumPy's NaN
+        df.replace('?', np.nan, inplace=True)
+
+        # Drop non-predictive metadata columns
+        cols_to_drop = ['state', 'county', 'community', 'communityname', 'fold']
+        df = df.drop(columns=cols_to_drop)
+
+        # The target variable is 'ViolentCrimesPerPop'
+        X = df.drop('ViolentCrimesPerPop', axis=1)
+        y = df['ViolentCrimesPerPop']
+
+        # 2. Ensure all feature columns are numeric before imputation
+        # This will convert object columns (due to '?') to float/int types
+        X = X.apply(pd.to_numeric, errors='coerce')
+        y = pd.to_numeric(y, errors='coerce')
+
+        # 3. Impute the now-numeric NaN values with the median
+        # Using DataFrame.fillna() is more efficient than a loop
+        X.fillna(X.median(), inplace=True)
+        # Also fill any potential missing values in the target variable
+        y.fillna(y.median(), inplace=True)
+
+        print("\nCommunities and Crime Shapes:")
+        print("Features (X):", X.shape)
+        print("Target   (y):", y.shape)
+
+        # Convert to float32 tensors. This will now work without error.
+        return torch.tensor(X.values, dtype=torch.float32), torch.tensor(
+            y.values.reshape(-1, 1), dtype=torch.float32
+        )
+    
 
 class HeartDataset:
 
@@ -63,6 +341,23 @@ class HeartDataset:
             df.to_csv(self.HEART_FILENAME, index=False)
         return pd.read_csv(self.HEART_FILENAME)
 
+    def get_data_for_analysis(self):
+        """
+        A helper method to get X and y as pandas objects, ideal for analysis.
+        """
+        df = self.get_heart_csv()
+        
+        # CORRECTED: X should be all columns except the target 'class'
+        X = df.drop(columns=['target'])
+        
+        # CORRECTED: y is the 'class' column
+        y, uniques = pd.factorize(df['target']) # Factorize turns strings ('+','-') into (0,1)
+        
+        # One-hot encode categorical features within X
+        categorical_cols = X.select_dtypes(include=['object', 'category']).columns
+        X_processed = pd.get_dummies(X, columns=categorical_cols, drop_first=True)
+        return X_processed, y
+
     def create_data(self):
         df = self.get_heart_csv()
         # Make binary labels: according to UCI, 'target'==0 as healthy, >0 as unhealthy
@@ -86,6 +381,24 @@ class AustralianCreditDataset:
             df = data.frame
             df.to_csv(DATA_FILENAME, index=False)
         return pd.read_csv(DATA_FILENAME)
+    
+    def get_data_for_analysis(self):
+        """
+        A helper method to get X and y as pandas objects, ideal for analysis.
+        """
+        df = self.get_csv()
+        
+        # CORRECTED: X should be all columns except the target 'class'
+        X = df.iloc[:, 1:]
+        
+        # CORRECTED: y is the 'class' column
+        y = pd.factorize(df.iloc[:, 1]) # Factorize turns strings ('+','-') into (0,1)
+        
+        # One-hot encode categorical features within X
+        categorical_cols = X.select_dtypes(include=['object', 'category']).columns
+        X_processed = pd.get_dummies(X, columns=categorical_cols, drop_first=True)
+        
+        return X_processed, y
 
     def create_data(self):
         df = self.get_csv()
@@ -122,6 +435,24 @@ class SpliceDataset:
         if self.n_samples:
             df = df.iloc[:self.n_samples]
         return df
+    
+    def get_data_for_analysis(self):
+        """
+        A helper method to get X and y as pandas objects, ideal for analysis.
+        """
+        df = self.get_csv()
+        
+        # CORRECTED: X should be all columns except the target 'class'
+        X = df.drop(columns=['target'])
+        
+        # CORRECTED: y is the 'class' column
+        y, uniques = pd.factorize(df['target']) # Factorize turns strings ('+','-') into (0,1)
+        
+        # One-hot encode categorical features within X
+        categorical_cols = X.select_dtypes(include=['object', 'category']).columns
+        X_processed = pd.get_dummies(X, columns=categorical_cols, drop_first=True)
+        
+        return X_processed, y
 
     def create_data(self):
         df = self.get_csv()
@@ -215,6 +546,7 @@ class SparseDataset(Dataset):
         )  # Noise
 
         # Convert to binary classification
+
         y = (y > y.median()).long()
 
         return X, y

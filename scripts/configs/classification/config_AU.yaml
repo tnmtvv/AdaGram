@@ -1,3 +1,4 @@
+
 # Experiment Configuration
 experiment:
   name: "optimizer_comparison"
@@ -6,10 +7,10 @@ experiment:
 # Data Configuration
 data:
   n_samples: 300
-  in_dims: [20]
+  in_dims: [14]
   out_dims: [2]
   test_size: 0.2
-  data_seeds: [10]
+  data_seeds: [1, 2, 3, 4, 5]
 
 # Global Training Configuration (for settings that apply to ALL runs)
 training:
@@ -26,71 +27,58 @@ models:
     model_seed: 100
     loss_function: "MSELoss"
 
+# Optimizer Configuration (with specific hyperparameters for each)
 optimizers:
 
   Shampoo:
     enabled: true
     requires_rank: false
-    learning_rates:
-    - 0.1
-    eps:
-    - 0.1
-    batch_size:
-    - 1
+    learning_rates: [0.05]
+    eps: [0.1]
+    batch_size: [1]
+
   KATE:
     enabled: true
     requires_rank: false
     # --- KATE-specific hyperparameters would go here ---
-    learning_rates:
-    - 0.1
-    batch_size:
-    - 1
-    eps:
-    - 0.01
+    learning_rates: [0.01]
+    batch_size: [1]
+    eps: [0.01]
+
   AdaGramPS:
     enabled: true
     requires_rank: true
     testing: false
     # --- AdaGramPS-specific hyperparameters ---
-    learning_rates:
-    - 0.1
-    batch_size:
-    - 1
-    eps:
-    - 1.0
-    ranks:     # Ranks specific to this optimizer
+    learning_rates: [0.05]
+    batch_size: [1]
+    eps: [0.5]
+    ranks: [1]             # Ranks specific to this optimizer
 
-    - 4
   Torch_Adagrad:
     enabled: true
     requires_rank: false
     # --- Torch Adagrad-specific hyperparameters ---
-    learning_rates:       # Adagrad often works well with higher LRs
-    - 0.1
-    batch_size:
-    - 1
-    eps:
-    - 0.01
+    learning_rates: [0.1]                    # Adagrad often works well with higher LRs
+    batch_size: [1]
+    eps: [0.01]
+
   FullAdaGrad:
     enabled: true
     requires_rank: false
     # --- FullAdaGrad-specific hyperparameters ---
-    learning_rates:
-    - 0.1
-    batch_size:
-    - 1
-    eps:
-    - 0.1
+    learning_rates: [0.1]
+    batch_size: [32] # change for gradients
+    eps: [0.5]
+
   Vanilla_SGD:
     enabled: true
     requires_rank: false
     # --- SGD-specific hyperparameters (note: no 'eps' or 'ranks') ---
-    learning_rates:
-    - 0.1
-    batch_size:
-    - 1
-    eps:
-    - nan
+    learning_rates: [0.01]
+    batch_size: [1]
+    eps: [nan]
+  # --- Other optimizers would follow the same pattern ---
   AdaGramFR_svd:
     testing: false
     enabled: false
@@ -117,7 +105,7 @@ tasks:
 
 # Dataset Configuration
 dataset:
-  type: "SparseDataset" # Options: SparseDataset, CorrelatedDataset, LinearDataset, MNIST, AU, Heart
+  type: "AU" # Options: SparseDataset, CorrelatedDataset, LinearDataset, MNIST, AU, Heart
   sparse_config:
     if_class: true
   correlated_config:

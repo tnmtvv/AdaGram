@@ -184,8 +184,8 @@ class AdaGram(Optimizer, ABC):
                 grad_vector = grad.reshape(-1)
                 param_vector = p.data.reshape(-1)
                 n = len(grad_vector)
-                if torch.isnan(grad_vector).any():
-                    print("grad_vector", torch.linalg.norm(grad_vector))
+                # if torch.isnan(grad_vector).any():
+                #     print("grad_vector", torch.linalg.norm(grad_vector))
 
                 
                 # Initialize state if needed
@@ -239,7 +239,7 @@ class AdaGram(Optimizer, ABC):
 
                     sqr_G = eigenvecs @ torch.diag(sqrt_eigenvals) @ eigenvecs.T
 
-                    v = torch.randn(n)
+                    v = torch.randn(n, device=grad.device, dtype=grad.dtype)
                     v = v / torch.norm(v)
 
                     y_1 = sqr_G @ v

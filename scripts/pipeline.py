@@ -33,7 +33,14 @@ from src.utils.dataset import (
     MNISTDataWrapper,
     SpliceDataset,
     HeartDataset,
-    AustralianCreditDataset
+    AustralianCreditDataset,
+    CorrelatedAnisotropicDataset,
+    IsotropicDataset, 
+    AnisotropicDataset,
+    LogisticAnisotropicDataset,
+    CommunitiesAndCrimeDataset,
+    StudentPerformanceDataset,
+    AIDSDataset
 )
 from src.utils.models import (
     LinearRegressionModel,
@@ -81,6 +88,9 @@ class ExperimentRunner:
         self.setup_directories()
         self.results = []
 
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"Using device: {self.device}")
+
     def seed_everything(self, seed: int):
         """Set all random seeds for reproducibility"""
         random.seed(seed)
@@ -90,6 +100,11 @@ class ExperimentRunner:
         torch.cuda.manual_seed(seed)
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = True
+
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(seed)
+            torch.cuda.manual_seed_all(seed) # if you are using multi-GPU.
+        torch.backends.cudnn.benchmark = False # Changed from True to False 
 
     def setup_directories(self):
         """Create necessary directories"""
@@ -117,6 +132,28 @@ class ExperimentRunner:
                 seed=seed,
                 if_class=if_class,
             )
+        
+        if dataset_type == "IsotropicDataset":
+            return IsotropicDataset(
+                n_samples=n_samples,
+                in_dim=in_dim,
+                out_dim=out_dim,
+                seed=seed,
+            )
+        if dataset_type == "LogAniso":
+            return LogisticAnisotropicDataset(
+                n_samples=n_samples,
+                in_dim=in_dim,
+                out_dim=out_dim,
+                seed=seed,
+            )
+        if dataset_type == "CorrelatedAnisotropicDataset":
+            return CorrelatedAnisotropicDataset(
+                n_samples=n_samples,
+                in_dim=in_dim,
+                out_dim=out_dim,
+                seed=seed,
+            )
         elif dataset_type == "MNIST":
             return MNISTDataWrapper()
         elif dataset_type == "AU":
@@ -125,6 +162,13 @@ class ExperimentRunner:
             return HeartDataset()
         elif dataset_type == "Splice":
             return SpliceDataset()
+        
+        elif dataset_type == "Crime":
+            return CommunitiesAndCrimeDataset()
+        elif dataset_type == "Aids":
+            return AIDSDataset()
+        elif dataset_type == "Student":
+            return StudentPerformanceDataset()
         elif dataset_type == "CorrelatedDataset" and seed:
             correlation = self.config.get("dataset.correlated_config.correlation", 0.8)
             if not correlation:
@@ -216,8 +260,8 @@ class ExperimentRunner:
         }
 
         return optimizer_map[opt_name]()
-
-    def train_model_stochastic(
+    
+    def train_model_stochastic_epochs(
         self,
         model,
         optimizer,
@@ -235,112 +279,86 @@ class ExperimentRunner:
         data_seed=None,
         task_name=None,
     ):
-        """Train model using stochastic gradient descent"""
-
+        """Train model using stochastic gradient descent."""
         num_epochs = self.config.get("training.num_epochs")
         shuffle = self.config.get("training.shuffle")
         use_tqdm = self.config.get("training.use_tqdm")
         grad_save_dir = self.config.get("output.gradients_dir")
         if_class = self.config.get("dataset.sparse_config.if_class")
+        dataset_type = self.config.get("dataset.type")
 
         if data_seed:
             self.seed_everything(data_seed)
 
         train_dataset = TensorDataset(X_train, y_train)
-        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle)
+        train_loader = DataLoader(
+            train_dataset, batch_size=batch_size, shuffle=shuffle
+        )
 
         if not num_epochs:
-            raise ValueError("num_epochs is none")
+            raise ValueError("num_epochs cannot be None")
+
         epoch_iterator = tqdm(range(num_epochs)) if use_tqdm else range(num_epochs)
         time_start = time.time()
-
-        # max_time = 0.3
+        
 
         for epoch in epoch_iterator:
-            # if time.time > max_time:
-            #     continue
-
             model.train()
-            start_epoch = time.time()
             epoch_loss = 0.0
             num_batches = 0
 
+            
+            # --- Initial Metrics (before any training) ---
             if epoch == 0:
-                y_pred_train = model(X_train)
-                y_pred_test = model(X_test)
-
-                train_loss = criterion(y_pred_train, y_train)
-                test_loss = criterion(y_pred_test, y_test)
-
                 with torch.no_grad():
-                    # Apply softmax to convert logits to probabilities
-                    y_pred_probs_train = torch.softmax(y_pred_train, dim=1)
-                    y_pred_probs_test = torch.softmax(y_pred_test, dim=1)
+                    y_pred_train = model(X_train)
+                    y_pred_test = model(X_test)
 
-                    # Get predicted class labels
+                    print("y_pred_train.shape", y_pred_train.shape)
+                    print("y_train.shape", y_train.shape)
+                    train_loss = criterion(y_pred_train, y_train)
+                    test_loss = criterion(y_pred_test, y_test)
+
+                    y_pred_probs_train = torch.softmax(y_pred_train, dim=1)
                     predicted_labels_train = torch.argmax(y_pred_probs_train, dim=1)
+                    y_pred_probs_test = torch.softmax(y_pred_test, dim=1)
                     predicted_labels_test = torch.argmax(y_pred_probs_test, dim=1)
 
-                    # Calculate accuracy
                     if if_class:
-                        accuracy_train = (
-                            (predicted_labels_train == y_train).float().mean().item()
-                        )
-                        accuracy_test = (
-                            (predicted_labels_test == y_test).float().mean().item()
-                        )
+                        accuracy_train = (predicted_labels_train == y_train).float().mean().item()
+                        accuracy_test = (predicted_labels_test == y_test).float().mean().item()
                     else:
-                        accuracy_test = 0
-                        accuracy_train = 0
+                        accuracy_train, accuracy_test = 0, 0
+
+                    r_in_name = f" rank {r}" if r is not None else ""
+                    self.results.extend([
+                        {
+                            "epoch": epoch, "optimizer": opt_name + r_in_name, "lr": lr,
+                            "loss": test_loss.item(), "accuracy": accuracy_test, "mode": "test",
+                            "rank": r, "eps": eps, "X_type": X_type, "avg_epoch_time": 0,
+                            "epoch_time": 0, "batch_size": batch_size,"data_seed": data_seed
+                        },
+                        {
+                            "epoch": epoch, "optimizer": opt_name + r_in_name, "lr": lr,
+                            "loss": train_loss.item(), "accuracy": accuracy_train, "mode": "train",
+                            "rank": r, "eps": eps, "X_type": X_type, "avg_epoch_time": 0,
+                            "epoch_time": 0, "batch_size": batch_size,"data_seed": data_seed
+                        },
+                    ])
 
                 r_in_name = f" rank {r}" if r is not None else ""
 
-                self.results.extend(
-                    [
-                        {
-                            "epoch": epoch,
-                            "optimizer": opt_name + r_in_name,
-                            "lr": lr,
-                            "loss": test_loss.item(),
-                            "accuracy": accuracy_test,
-                            "mode": "test",
-                            "rank": r,
-                            "eps": eps,
-                            "X_type": X_type,
-                            "avg_epoch_time": 0,
-                            "epoch_time": 0,
-                            "batch_size": batch_size,
-                            "data_seed": data_seed,
-                        },
-                        {
-                            "epoch": epoch,
-                            "optimizer": opt_name + r_in_name,
-                            "lr": lr,
-                            "loss": train_loss.item(),
-                            "accuracy": accuracy_train,
-                            "mode": "train",
-                            "rank": r,
-                            "eps": eps,
-                            "X_type": X_type,
-                            "avg_epoch_time": 0,
-                            "epoch_time": 0,
-                            "batch_size": batch_size,
-                            "data_seed": data_seed,
-                        },
-                    ]
-                )
+                # Note: The dictionaries created here were not assigned or used.
+                # If they are meant to be logged, they should be appended to self.results.
 
-            all_grads = {name: [] for name, _ in model.named_parameters()}
-
-            for batch_idx, (batch_X, batch_y) in enumerate(tqdm(train_loader, desc='Training')):
+            # --- Training Loop for One Epoch ---
+            for batch_idx, (batch_X, batch_y) in enumerate(tqdm(train_loader, desc="Training")):
+                batch_X, batch_y = batch_X.to(self.device), batch_y.to(self.device)
+                
                 optimizer.zero_grad()
                 y_pred = model(batch_X)
                 batch_loss = criterion(y_pred, batch_y)
                 batch_loss.backward()
-
-                # for name, param in model.named_parameters():
-                #     if param.grad is not None:
-                        # all_grads[name].append(param.grad.detach().cpu().numpy())
 
                 if r:
                     optimizer.step(epoch)
@@ -349,94 +367,164 @@ class ExperimentRunner:
 
                 epoch_loss += batch_loss.item()
                 num_batches += 1
+            
+            # --- Metrics Calculation After Each Epoch ---
+            with torch.no_grad():
+                y_pred_train = model(X_train)
+                y_pred_test = model(X_test)
+                train_loss = criterion(y_pred_train, y_train)
+                test_loss = criterion(y_pred_test, y_test)
 
-            # if grad_save_dir:
-            #     # 1. Create the optimizer-specific subdirectory
-            #     optimizer_specific_dir = os.path.join(grad_save_dir, opt_name)
-            #     os.makedirs(optimizer_specific_dir, exist_ok=True)
+                y_pred_probs_train = torch.softmax(y_pred_train, dim=1)
+                predicted_labels_train = torch.argmax(y_pred_probs_train, dim=1)
+                y_pred_probs_test = torch.softmax(y_pred_test, dim=1)
+                predicted_labels_test = torch.argmax(y_pred_probs_test, dim=1)
 
-            #     # 2. Construct a unique filename with all hyperparameter info
-            #     rank_str = f"rank-{r}" if r is not None else "rank-None"
-            #     filename = (
-            #         f"epoch-{epoch+1}_lr-{lr}_eps-{eps}_bs-{batch_size}_"
-            #         f"{rank_str}.npz"
-            #     )
-                
-            #     filepath = os.path.join(optimizer_specific_dir, filename)
+                if if_class:
+                    accuracy_train = (predicted_labels_train == y_train).float().mean().item()
+                    accuracy_test = (predicted_labels_test == y_test).float().mean().item()
+                else:
+                    accuracy_train, accuracy_test = 0, 0
 
-            #     # 3. Save the gradients dictionary to a .npy file
-            #     try:
-            #         np.savez_compressed(filepath, **all_grads)
-            #     except Exception as e:
-            #         print(f"Warning: Could not save gradients to {filepath}. Error: {e}")
-
-            y_pred_train = model(X_train)
-            y_pred_test = model(X_test)
-
-            train_loss = criterion(y_pred_train, y_train)
-            test_loss = criterion(y_pred_test, y_test)
-
-            y_pred_probs_train = torch.softmax(y_pred_train, dim=1)
-            y_pred_probs_test = torch.softmax(y_pred_test, dim=1)
-
-            predicted_labels_train = torch.argmax(y_pred_probs_train, dim=1)
-            predicted_labels_test = torch.argmax(y_pred_probs_test, dim=1)
-
-            # Calculate accuracy
-            if if_class:
-                accuracy_train = (
-                    (predicted_labels_train == y_train).float().mean().item()
-                )
-                accuracy_test = (predicted_labels_test == y_test).float().mean().item()
-            else:
-                accuracy_train = 0
-                accuracy_test = 0
-
+            # --- Logging Results ---
             elapsed_time = time.time() - time_start
-            epoch_time = time.time() - time_start # changed to all time
             avg_epoch_time = elapsed_time / (epoch + 1)
-
             r_in_name = f" rank {r}" if r is not None else ""
 
-            self.results.extend(
-                [
-                    {
-                        "epoch": epoch + 1,
-                        "optimizer": opt_name + r_in_name,
-                        "lr": lr,
-                        "loss": test_loss.item(),
-                        "accuracy": accuracy_test,
-                        "mode": "test",
-                        "rank": r,
-                        "eps": eps,
-                        "X_type": X_type,
-                        "avg_epoch_time": avg_epoch_time,
-                        "epoch_time": epoch_time,
-                        "batch_size": batch_size,
-                    },
-                    {
-                        "epoch": epoch + 1,
-                        "optimizer": opt_name + r_in_name,
-                        "lr": lr,
-                        "loss": train_loss.item(),
-                        "accuracy": accuracy_train,
-                        "mode": "train",
-                        "rank": r,
-                        "eps": eps,
-                        "X_type": X_type,
-                        "avg_epoch_time": avg_epoch_time,
-                        "epoch_time": epoch_time,
-                        "batch_size": batch_size,
-                    },
-                ]
-            )
+            self.results.extend([
+                {
+                    "epoch": epoch + 1, "optimizer": opt_name + r_in_name, "lr": lr,
+                    "loss": test_loss.item(), "accuracy": accuracy_test, "mode": "test",
+                    "rank": r, "eps": eps, "X_type": X_type, "avg_epoch_time": avg_epoch_time,
+                    "epoch_time": elapsed_time, "batch_size": batch_size, "data_seed": data_seed
+                },
+                {
+                    "epoch": epoch + 1, "optimizer": opt_name + r_in_name, "lr": lr,
+                    "loss": train_loss.item(), "accuracy": accuracy_train, "mode": "train",
+                    "rank": r, "eps": eps, "X_type": X_type, "avg_epoch_time": avg_epoch_time,
+                    "epoch_time": elapsed_time, "batch_size": batch_size, "data_seed": data_seed
+                },
+            ])
 
+        # --- Final Evaluation ---
         model.eval()
         with torch.no_grad():
             y_pred_test = model(X_test)
-            test_loss = criterion(y_pred_test, y_test).item()
+            final_test_loss = criterion(y_pred_test, y_test).item()
 
-        return test_loss
+        return final_test_loss
+
+    def train_model_stochastic_time(
+        self,
+        model,
+        optimizer,
+        criterion,
+        X_train,
+        y_train,
+        X_test,
+        y_test,
+        opt_name,
+        lr,
+        batch_size,
+        eps,
+        X_type,
+        time_budget=60,  # Default time budget set to 10 seconds
+        r=None,
+        data_seed=None,
+        task_name=None,
+    ):
+        """Train model using stochastic gradient descent with a time budget"""
+
+        # Configuration parameters
+        shuffle = self.config.get("training.shuffle")
+        if_class = self.config.get("dataset.sparse_config.if_class")
+
+        # Set data seed for reproducibility
+        if data_seed:
+            self.seed_everything(data_seed)
+
+        # Create DataLoader for training data
+        train_dataset = TensorDataset(X_train, y_train)
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle)
+
+        start_time = time.time()
+        epoch = 0
+
+        # Loop until the elapsed time exceeds the time budget
+        while time.time() - start_time < time_budget:
+            model.train()
+
+            # Initial evaluation before the first epoch
+            if epoch == 0:
+                y_pred_train = model(X_train)
+                y_pred_test = model(X_test)
+                train_loss = criterion(y_pred_train, y_train)
+                test_loss = criterion(y_pred_test, y_test)
+
+                with torch.no_grad():
+                    # Calculate initial accuracy for classification tasks
+                    if if_class:
+                        y_pred_probs_train = torch.softmax(y_pred_train, dim=1)
+                        predicted_labels_train = torch.argmax(y_pred_probs_train, dim=1)
+                        accuracy_train = (predicted_labels_train == y_train).float().mean().item()
+
+                        y_pred_probs_test = torch.softmax(y_pred_test, dim=1)
+                        predicted_labels_test = torch.argmax(y_pred_probs_test, dim=1)
+                        accuracy_test = (predicted_labels_test == y_test).float().mean().item()
+                    else:
+                        accuracy_train, accuracy_test = 0, 0
+
+                # Log initial results
+                r_in_name = f" rank {r}" if r is not None else ""
+                self.results.extend([
+                    {"epoch": 0, "time": 0, "optimizer": opt_name + r_in_name, "loss": test_loss.item(), "accuracy": accuracy_test, "mode": "test"},
+                    {"epoch": 0,  "time": 0, "optimizer": opt_name + r_in_name, "loss": train_loss.item(), "accuracy": accuracy_train, "mode": "train"},
+                ])
+
+            # Training loop for the current epoch
+            for batch_X, batch_y in train_loader:
+                batch_X, batch_y = batch_X.to(self.device), batch_y.to(self.device)
+                optimizer.zero_grad()
+                y_pred = model(batch_X)
+                batch_loss = criterion(y_pred, batch_y)
+                batch_loss.backward()
+                optimizer.step(epoch) if r else optimizer.step()
+
+            # Evaluation after the epoch
+            y_pred_train = model(X_train)
+            y_pred_test = model(X_test)
+            train_loss = criterion(y_pred_train, y_train)
+            test_loss = criterion(y_pred_test, y_test)
+
+            # Calculate accuracy for classification tasks
+            if if_class:
+                y_pred_probs_train = torch.softmax(y_pred_train, dim=1)
+                predicted_labels_train = torch.argmax(y_pred_probs_train, dim=1)
+                accuracy_train = (predicted_labels_train == y_train).float().mean().item()
+
+                y_pred_probs_test = torch.softmax(y_pred_test, dim=1)
+                predicted_labels_test = torch.argmax(y_pred_probs_test, dim=1)
+                accuracy_test = (predicted_labels_test == y_test).float().mean().item()
+            else:
+                accuracy_train, accuracy_test = 0, 0
+
+            # Log results for the completed epoch
+            self.results.extend([
+                {"epoch": epoch + 1,"time": time.time() - start_time, "optimizer": opt_name + r_in_name, "loss": test_loss.item(), "accuracy": accuracy_test, "mode": "test"},
+                {"epoch": epoch + 1,"time": time.time() - start_time, "optimizer": opt_name + r_in_name, "loss": train_loss.item(), "accuracy": accuracy_train, "mode": "train"},
+            ])
+
+            epoch += 1
+
+        # Final evaluation
+        model.eval()
+        with torch.no_grad():
+            y_pred_test = model(X_test)
+            final_test_loss = criterion(y_pred_test, y_test).item()
+
+        return final_test_loss
+
+
 
     def run_experiment(self):
         """Run the main experiment"""
@@ -447,7 +535,7 @@ class ExperimentRunner:
 
         if not data_seeds or not in_dims or not out_dims:
             raise ValueError("data_seeds or dimensions are not defined")
-        base_model = self.get_model("BinClass", in_dims[0], out_dims[0])
+        base_model = self.get_model("BinClass", in_dims[0], out_dims[0]).to(self.device)
 
         for data_seed in data_seeds:
             ds = self.get_dataset(in_dims[0], out_dims[0], data_seed)
@@ -469,6 +557,11 @@ class ExperimentRunner:
                         test_size=self.config.get("data.test_size"),
                         random_state=42,
                     )
+
+                    X_train = X_train.to(self.device)
+                    X_test = X_test.to(self.device)
+                    y_train = y_train.to(self.device)
+                    y_test = y_test.to(self.device)
 
                     print(f"X_train shape: {X_train.shape}")
                     print(f"y_train shape: {y_train.shape}")
@@ -516,7 +609,7 @@ class ExperimentRunner:
                                                 task=task_name,
                                             )
 
-                                            test_loss = self.train_model_stochastic(
+                                            test_loss = self.train_model_stochastic_epochs(
                                                 model=model,
                                                 optimizer=optimizer,
                                                 criterion=criterion,
@@ -534,12 +627,12 @@ class ExperimentRunner:
                                                 task_name=task_name,
                                             )
                                     else:
-                                        model = copy.deepcopy(base_model)
+                                        model = copy.deepcopy(base_model).to(self.device)
                                         optimizer = self.get_optimizer(
                                             opt_name, model.parameters(), lr, eps
                                         )
 
-                                        test_loss = self.train_model_stochastic(
+                                        test_loss = self.train_model_stochastic_epochs(
                                             model=model,
                                             optimizer=optimizer,
                                             criterion=criterion,
@@ -565,7 +658,7 @@ class ExperimentRunner:
                     df["loss"] = df["loss"].astype(float)
 
                     results_dir = self.config.get("output.results_dir")
-                    filename = f"{task_name}_Synth_best_params_{in_dims[0]}_by_{out_dims[0]}.csv"
+                    filename = f"{task_name}_Tridiag_uni_weights_grid_search_{in_dims[0]}_by_{out_dims[0]}.csv"
                     if results_dir:
                         filepath = os.path.join(results_dir, filename)
                         df.to_csv(filepath)
@@ -575,10 +668,11 @@ class ExperimentRunner:
 
 def main():
     """Main function to run the experiment"""
-    config = Config("configs/config_Synth.yaml")
+    config = Config("./configs/classification/config_Synth_Aniso.yaml")
     runner = ExperimentRunner(config)
     runner.run_experiment()
 
 
 if __name__ == "__main__":
     main()
+
