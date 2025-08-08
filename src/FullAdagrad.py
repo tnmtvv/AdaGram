@@ -1,11 +1,8 @@
 import torch
 from torch.optim import Optimizer
-import math
 import csv
 import os
-import traceback
 
-from src.adagram_base import AdaGram, AdaGramLogger
 from copy import deepcopy
 
 

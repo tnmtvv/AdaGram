@@ -8,11 +8,11 @@ import os
 import libcontext
 
 
-from src.adagram_fixed_rank import AdaGramFR
-from src.adagram_vanilla import AdaGramVanilla
-from src.adagram_projector_splitting import AdaGramPS
-from src.shampoo import Shampoo
-from src.full_G import FullAdaGrad
+from src.AdagramSVD import AdaGramFR
+from src.AdagramVanilla import AdaGramVanilla
+from src.AdagramPS import AdaGramPS
+from src.Shampoo import Shampoo
+from src.FullAdagrad import FullAdaGrad
 
 
 class OptimizerStateTester:

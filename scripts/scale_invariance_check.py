@@ -7,9 +7,16 @@ import torch
 import libcontext
 from typing import Optional
 
-from src.adagram_fixed_rank import AdaGramFR
-from src.adagram_vanilla import AdaGramVanilla
-from src.adagram_projector_splitting import AdaGramPS
+from src.AdagramSVD import AdaGramFR
+from src.AdagramVanilla import AdaGramVanilla
+from src.AdagramPS import AdaGramPS
+
+
+"""
+Original implementation from the https://github.com/nazya/KATE/tree/main
+"""
+
+
 
 n_feature = 20  # dimension of data
 n_data = 100  # number of data-points

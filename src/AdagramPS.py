@@ -1,18 +1,13 @@
 import torch
-from torch.optim import Optimizer
-import math
-import csv
-import os
 
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any
 from src.adagram_base import AdaGram, AdaGramLogger
 
-from src.utils.profiler_utils import profile_function
 from line_profiler import profile
 
 
 class AdaGramPS(AdaGram):
-
+    """Adagram algorithm with projector splitting strategy"""
     def __init__(
         self,
         params,
@@ -26,20 +21,7 @@ class AdaGramPS(AdaGram):
         enable_logging: bool = True,
         save_matrix: bool = False,
     ):
-        """
-        Initialize AdaGramPS optimizer
 
-        Args:
-            params: Model parameters
-            lr: Learning rate
-            eps: Epsilon for numerical stability
-            weight_decay: Weight decay factor
-            max_rank: Maximum rank for approximation
-            task: Task name
-            logger: Custom logger instance
-            enable_logging: Whether to enable logging
-        """
-        # Call parent constructor with all required parameters
         super().__init__(
             params=params,
             lr=lr,
@@ -104,38 +86,6 @@ class AdaGramPS(AdaGram):
         # Return as column vectors if needed
         return U_cur.unsqueeze(1), L_norm, V_cur.unsqueeze(1)
 
-    # def one_rank_psi(self, b, g, u, s, v):
-    #     u = u.reshape(-1)
-    #     s = s.reshape(-1)
-    #     v = v.reshape(-1)
-
-    #     gu = torch.dot(g, u)
-    #     gv = torch.dot(g, v)
-    #     ug = torch.dot(u, g)
-    #     vu = torch.dot(v, u)
-    #     v_norm_sq = torch.dot(v, v)
-
-    #     const = b * (gv - gu * v_norm_sq)
-    #     delta_av = const * g
-
-    #     K_cur = u * s + delta_av
-    #     K_norm = torch.sqrt(torch.dot(K_cur, K_cur))
-
-    #     U_cur = K_cur / K_norm
-    #     S_hat = K_norm 
-    #     S_tild = S_hat - ug * const
-
-    #     gk = torch.dot(g, K_cur / K_norm)
-    #     delta_au = ((1 - vu) * b * gk) * g
-    #     L_cur = v * S_tild + delta_au  # Fixed multiplication
-
-    #     L_norm = torch.sqrt(torch.dot(L_cur, L_cur))
-    #     V_cur = L_cur / L_norm
-    #     S_cur_T = L_norm
-
-    #     return U_cur.reshape(-1, 1), S_cur_T, V_cur.reshape(-1, 1)
-
-
     @profile
     def update_PQ(
         self,
@@ -146,13 +96,10 @@ class AdaGramPS(AdaGram):
 
         beta_g = (beta * g_bar).reshape(-1, 1)
         g_bar_col = g_bar.reshape(-1, 1)
-        g_bar_row = g_bar.reshape(1, -1)
 
         reconstruct_error = torch.tensor(0, device=g_bar.device, dtype=g_bar.dtype)
 
         if "P" not in state:
-            # print("here")
-            # print("'U' not in state")
             state["P"] = beta_g
             state["Q"] = g_bar_col
 
@@ -186,10 +133,6 @@ class AdaGramPS(AdaGram):
                 state["V"] = state["V"]
                 reconstruct_error = 0
 
-                # print("first_error", reconstruct_error)
-
-
-            # Precompute once for efficiency:
             if self.max_rank == 1:
                 update = g_bar
                 state["U"], state["S"], state["V"] = self.one_rank_psi(
@@ -197,7 +140,7 @@ class AdaGramPS(AdaGram):
             ) 
                 state["P"] = state["U"] * state["S"]
             else:
-                g_p_proj = g_bar @ state["P"]             # shape: [k]
+                g_p_proj = g_bar @ state["P"]             
                 update = torch.ger(g_bar.mul_(beta), g_bar - state["Q"] @ g_p_proj)
 
                 if self.enable_logging:
@@ -218,5 +161,5 @@ class AdaGramPS(AdaGram):
 
             
             state["Q"] = state["V"]
-            # print("reconstruct_error", reconstruct_error)
+
         return state["P"], state["Q"], reconstruct_error

@@ -1,7 +1,11 @@
 import torch
 
-
 class KATE(torch.optim.Optimizer):  # delta 0 or 1e-8
+    """
+    Original implementation from the https://github.com/nazya/KATE/tree/main
+    """
+
+
     def __init__(
         self,
         params,

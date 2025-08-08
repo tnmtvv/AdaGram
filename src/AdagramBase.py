@@ -4,16 +4,20 @@ import numpy as np
 import os
 
 from typing import Optional, Dict, Any, Tuple
-from abc import ABC, abstractmethod
+from abc import ABC
 
 from src.utils.Logger import AdaGramLogger
 
-from src.utils.profiler_utils import profile_function
 from line_profiler import profile
 
 
 class AdaGram(Optimizer, ABC):
-    """Abstract base class for AdaGram optimizers with pluggable update strategies"""
+    """
+    Abstract base class for AdaGram optimizers with pluggable update strategies (different Q, P updates).
+
+    At the end of the step, it replaces p.grad with the preconditioned gradient
+    for analysis purposes.
+    """
 
     def __init__(
         self,
@@ -29,19 +33,7 @@ class AdaGram(Optimizer, ABC):
         enable_logging: bool = False,
         save_matrix: bool = False,
     ):
-        """
-        Initialize AdaGram base optimizer
 
-        Args:
-            params: Model parameters
-            lr: Learning rate
-            eps: Epsilon for numerical stability
-            weight_decay: Weight decay factor
-            max_rank: Maximum rank for approximation
-            task: Task name
-            logger: Custom logger instance
-            enable_logging: Whether to enable logging
-        """
         if lr <= 0.0:
             raise ValueError(f"Invalid learning rate: {lr}")
         if eps <= 0.0:
@@ -96,23 +88,6 @@ class AdaGram(Optimizer, ABC):
             state["L_t"] = state["L_0"] * torch.eye(n, device=grad.device, dtype=grad.dtype)
         state["L_0_inv"] = 1 / state["L_0"]
         state["step_count"] = 0
-
-    # def update_grad_vector(
-    #     self, state: Dict[str, Any], grad_vector: torch.Tensor
-    # ) -> torch.Tensor:
-    #     """Update gradient vector with preconditioning"""
-    #     if "P" not in state:
-    #         g_bar = state["L_0_inv"] @ grad_vector
-    #     else:
-    #         identity = torch.eye(
-    #             grad_vector.shape[0], device=grad_vector.device, dtype=grad_vector.dtype
-    #         )
-    #         g_bar = (
-    #             (identity - state["P"] @ state["Q"].T)
-    #             @ state["L_0_inv"]
-    #             @ grad_vector
-    #         )
-    #     return g_bar
 
     def update_grad_vector(self, state, grad_vector):
         d = state["L_0_inv"]  # 1D tensor, diagonal entries
@@ -185,9 +160,6 @@ class AdaGram(Optimizer, ABC):
                     grad_vector = grad.reshape(-1)
                     param_vector = p.data.reshape(-1)
                     n = len(grad_vector)
-                    # if torch.isnan(grad_vector).any():
-                    #     print("grad_vector", torch.linalg.norm(grad_vector))
-    
                     
                     # Initialize state if needed
     
@@ -218,7 +190,6 @@ class AdaGram(Optimizer, ABC):
                             filename = f"G_matrix_epoch_{epoch+1}_batch_{state['step_count']}_adagram_task_{getattr(self, 'task_name', 'unknown')}.pt"
                             torch.save(state["G"], os.path.join(self.save_dir, filename))
     
-                    # Calculate coefficients
                     g_bar_norm_sq, alpha, beta = self.calculate_coeffs(g_bar)
     
                     # Update P and Q matrices (implemented by subclasses)
@@ -251,8 +222,7 @@ class AdaGram(Optimizer, ABC):
                         result = state["L_t"] @ state["L_t"].T
                         target = state["G"]
                         error_norm = torch.norm(torch.abs(target - result)) / torch.norm(target)
-    
-                    # Increment step counter
+
                     state["step_count"] += 1
     
                     # Log statistics

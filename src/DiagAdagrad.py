@@ -1,13 +1,12 @@
 import torch
 from torch.optim import Optimizer
-import math
 
 class CustomAdaGrad(Optimizer):
     """
     Implements the standard element-wise AdaGrad algorithm.
 
     At the end of the step, it replaces p.grad with the preconditioned gradient
-    for analysis purposes, as requested.
+    for analysis purposes.
     """
     def __init__(self, params, lr=1e-2, eps=1e-10, weight_decay=0, initial_accumulator_value=0):
         if not 0.0 <= lr:

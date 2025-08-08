@@ -9,7 +9,7 @@ data:
   in_dims: [20]
   out_dims: [2]
   test_size: 0.2
-  data_seeds: [10]
+  data_seeds: [1, 2, 3, 4, 5]
 
 # Global Training Configuration (for settings that apply to ALL runs)
 training:
@@ -32,9 +32,9 @@ optimizers:
     enabled: true
     requires_rank: false
     # --- FullAdaGrad-specific hyperparameters ---
-    learning_rates: [0.1, 0.01, 0.05]
-    batch_size: [1, 32]        # change for gradients
-    eps: [0.5, 0.2, 0.1, 1]
+    learning_rates: [0.1]
+    batch_size: [32]           # change for gradients
+    eps: [0.2]
   # --- Other optimizers would follow the same pattern ---
 
   Shampoo:
@@ -57,25 +57,25 @@ optimizers:
     requires_rank: true
     testing: false
     # --- AdaGramPS-specific hyperparameters ---
-    learning_rates: [0.1, 0.01, 0.05]
-    batch_size: [1, 32]
-    eps: [0.5, 0.2, 0.1, 1]
-    ranks: [1, 2, 3, 4, 5]                                 # Ranks specific to this optimizer
+    learning_rates: [0.01]
+    batch_size: [1]
+    eps: [1.0]
+    ranks: [1]                                             # Ranks specific to this optimizer
 
   Torch_Adagrad:
     enabled: true
     requires_rank: false
     # --- Torch Adagrad-specific hyperparameters ---
-    learning_rates: [0.1, 0.01, 0.05]                                          # Adagrad often works well with higher LRs
-    batch_size: [1, 32]
-    eps: [0.5, 0.2, 0.1, 1]
+    learning_rates: [0.1]                                                      # Adagrad often works well with higher LRs
+    batch_size: [32]
+    eps: [0.1]
 
   Vanilla_SGD:
     enabled: true
     requires_rank: false
     # --- SGD-specific hyperparameters (note: no 'eps' or 'ranks') ---
-    learning_rates: [0.1, 0.01, 0.05]
-    batch_size: [1, 32]
+    learning_rates: [0.1]
+    batch_size: [1]
     eps: [nan]
 
 
