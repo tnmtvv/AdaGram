@@ -6,6 +6,7 @@ import os
 import traceback
 
 from src.adagram_base import AdaGram, AdaGramLogger
+from copy import deepcopy
 
 
 class FullAdaGrad(Optimizer):
@@ -121,43 +122,64 @@ class FullAdaGrad(Optimizer):
         if closure is not None:
             loss = closure()
 
-        for group in self.param_groups:
+        with torch.no_grad():
+            for group in self.param_groups:
 
-            for param_idx, p in enumerate(group["params"]):
-                if p.grad is None:
-                    continue
+                for param_idx, p in enumerate(group["params"]):
+                    if p.grad is None:
+                        continue
 
-                # print("p.grad.data.shape", p.grad.data.shape)
-                grad = p.grad.data
-                state = self.state[p]
+                    # print("p.grad.data.shape", p.grad.data.shape)
+                    grad = p.grad.data
+                    state = self.state[p]
 
-                original_shape = p.data.shape
+                    original_shape = p.data.shape
 
-                grad_vector = grad.reshape(-1)
-                param_vector = p.data.reshape(-1)
-                n = len(grad_vector)
+                    grad_vector = grad.reshape(-1)
+                    param_vector = p.data.reshape(-1)
+                    n = len(grad_vector)
 
-                if len(state) == 0:
-                    print("self.eps", self.eps)
-                    print("grad_vector", grad_vector)
-                    state["G"] = self.eps * torch.eye(
-                        n, device=grad.device, dtype=grad.dtype
-                    )
-                    state["step_count"] = 0  # Initialize step counter
+                    if len(state) == 0:
+                        print("self.eps", self.eps)
+                        print("grad_vector", grad_vector)
+                        state["G"] = self.eps * torch.eye(
+                            n, device=grad.device, dtype=grad.dtype
+                        )
+                        state["step_count"] = 0  # Initialize step counter
 
-                state["G"] += torch.ger(grad_vector, grad_vector)
+                    state["G"] += torch.ger(grad_vector, grad_vector)
 
-                eigenvals, eigenvecs = torch.linalg.eigh(state["G"])
-                clamped_eigenvals = torch.clamp(eigenvals, min=0.0)
-                sqrt_eigenvals = torch.sqrt(clamped_eigenvals + 0.0001)
-                sqr_G = eigenvecs @ torch.diag(sqrt_eigenvals) @ eigenvecs.T
-                # print("eigenvals", eigenvals)
-                # sqrt_G = torch.linalg.cholesky(state["G"])
+                    eigenvals, eigenvecs = torch.linalg.eigh(state["G"])
+                    # clamped_eigenvals = torch.clamp(eigenvals, min=0.0)
+                    # sqrt_eigenvals = torch.sqrt(clamped_eigenvals + 0.0001)
+                    sqr_G = eigenvecs @ torch.diag(eigenvals) @ eigenvecs.T
+                    # print("eigenvals", eigenvals)
+                    # sqrt_G = torch.linalg.cholesky(state["G"])
 
-                precond_grad = torch.linalg.inv(sqr_G) @ grad_vector
+                    # try:
+                        # Attempt to invert the matrix and compute the preconditioned gradient
+                    precond_grad = torch.linalg.inv(sqr_G) @ grad_vector
 
-                param_vector.add_(precond_grad, alpha=-group["lr"])
-                p.data = param_vector.reshape(original_shape)
-                state["step_count"] += 1
+                    # except torch.linalg.LinAlgError:
+                    #     print("state G \n", state["G"])
+                    #     print("state G symetric\n", torch.allclose(state["G"], state["G"].T))
+                    #     print("eigenvals\n", eigenvals)
+                    #     print("grad_vector\n", grad_vector)
+
+                    if state["step_count"] == 1:
+                        print("state G \n", state["G"])
+                        print("state G symetric\n", torch.allclose(state["G"], state["G"].T))
+                        print("eigenvals\n", eigenvals)
+                        print("grad_vector\n", grad_vector)
+                        print("precond_grad\n", precond_grad)
+                        
+                    old_p = deepcopy(param_vector)
+                    param_vector.add_(precond_grad, alpha=-group["lr"])
+                    # if state["step_count"] == 1:
+                    #     print("old_p\n", old_p)
+                    #     print("param_vector\n", param_vector.reshape(original_shape))
+                    p.data = param_vector.reshape(original_shape)
+                    p.grad.data = precond_grad
+                    state["step_count"] += 1
 
         return loss

@@ -9,7 +9,7 @@ data:
   in_dims: [20]
   out_dims: [2]
   test_size: 0.2
-  data_seeds: [1, 2, 3, 4, 5]
+  data_seeds: [10]
 
 # Global Training Configuration (for settings that apply to ALL runs)
 training:
@@ -28,13 +28,15 @@ models:
 
 optimizers:
 
+
+
   FullAdaGrad:
     enabled: true
     requires_rank: false
     # --- FullAdaGrad-specific hyperparameters ---
     learning_rates: [0.1, 0.01, 0.05]
-    batch_size: [1, 32]                # change for gradients
-    eps: [0.5, 0.2, 0.1, 0.01]
+    batch_size: [1, 32]        # change for gradients
+    eps: [0.5, 0.2, 0.1, 1]
   # --- Other optimizers would follow the same pattern ---
 
   Shampoo:
@@ -48,7 +50,7 @@ optimizers:
     enabled: false
     requires_rank: false
     # --- KATE-specific hyperparameters would go here ---
-    learning_rates: [0.1, 0.01, 0.05]
+    learning_rates: [0.01]
     batch_size: [1, 32]
     eps: [0.5, 0.2, 0.1, 0.01]
 
@@ -59,16 +61,16 @@ optimizers:
     # --- AdaGramPS-specific hyperparameters ---
     learning_rates: [0.1, 0.01, 0.05]
     batch_size: [1, 32]
-    eps: [0.5, 0.2, 0.1, 0.01]
-    ranks: [1, 2, 3, 4, 5]                                                                     # Ranks specific to this optimizer
+    eps: [0.5, 0.2, 0.1, 1]
+    ranks: [1, 2, 3, 4, 5]                                 # Ranks specific to this optimizer
 
   Torch_Adagrad:
     enabled: true
     requires_rank: false
     # --- Torch Adagrad-specific hyperparameters ---
-    learning_rates: [0.1, 0.01, 0.05]                                                                          # Adagrad often works well with higher LRs
+    learning_rates: [0.1, 0.01, 0.05]                                          # Adagrad often works well with higher LRs
     batch_size: [1, 32]
-    eps: [0.5, 0.2, 0.1, 0.01]
+    eps: [0.5, 0.2, 0.1, 1]
 
   Vanilla_SGD:
     enabled: true
@@ -105,7 +107,7 @@ tasks:
 
 # Dataset Configuration
 dataset:
-  type: "LogAniso" # Options: SparseDataset, CorrelatedDataset, LinearDataset, MNIST, AU, Heart
+  type: "AnisoDataset" # Options: SparseDataset, CorrelatedDataset, LinearDataset, MNIST, AU, Heart
   sparse_config:
     if_class: true
   correlated_config:

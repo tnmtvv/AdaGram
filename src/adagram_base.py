@@ -172,105 +172,114 @@ class AdaGram(Optimizer, ABC):
         if closure is not None:
             loss = closure()
 
-        for group in self.param_groups:
-            for param_idx, p in enumerate(group["params"]):
-                if p.grad is None:
-                    continue
-
-                grad = p.grad.data
-                state = self.state[p]
-                original_shape = p.data.shape
-
-                grad_vector = grad.reshape(-1)
-                param_vector = p.data.reshape(-1)
-                n = len(grad_vector)
-                # if torch.isnan(grad_vector).any():
-                #     print("grad_vector", torch.linalg.norm(grad_vector))
-
-                
-                # Initialize state if needed
-
-                if len(state) == 0:
-                    self.initialize(state, n, grad)
+        with torch.no_grad():
+            for group in self.param_groups:
+                for param_idx, p in enumerate(group["params"]):
+                    if p.grad is None:
+                        continue
+                    
+                    grad = p.grad.data
+                    state = self.state[p]
+                    original_shape = p.data.shape
+    
+                    grad_vector = grad.reshape(-1)
+                    param_vector = p.data.reshape(-1)
+                    n = len(grad_vector)
+                    # if torch.isnan(grad_vector).any():
+                    #     print("grad_vector", torch.linalg.norm(grad_vector))
+    
+                    
+                    # Initialize state if needed
+    
+                    if len(state) == 0:
+                        self.initialize(state, n, grad)
+                        if self.enable_logging and self.save_matrix:
+                            if (
+                                param_idx == 0
+                            ):  # Save only for first parameter to avoid too many files
+                                filename = f"G_matrix_epoch_0_adagram_task_{getattr(self, 'task_name', 'unknown')}.pt"
+                                torch.save(
+                                    state["G"], os.path.join(self.save_dir, filename)
+                                )
+    
+                    # Update gradient vector
+                    g_bar = self.update_grad_vector(state, grad_vector)
+    
+                    # Update G matrix
+                    if self.enable_logging:
+                        if "G" not in state:
+                            state["G"] = self.eps * torch.eye(n, device=grad.device, dtype=grad.dtype)
+                        state["G"] += torch.ger(grad_vector, grad_vector)
+    
                     if self.enable_logging and self.save_matrix:
                         if (
-                            param_idx == 0
+                            epoch is not None and param_idx == 0
                         ):  # Save only for first parameter to avoid too many files
-                            filename = f"G_matrix_epoch_0_adagram_task_{getattr(self, 'task_name', 'unknown')}.pt"
-                            torch.save(
-                                state["G"], os.path.join(self.save_dir, filename)
-                            )
-
-                # Update gradient vector
-                g_bar = self.update_grad_vector(state, grad_vector)
-
-                # Update G matrix
-                if self.enable_logging:
-                    if "G" not in state:
-                        state["G"] = self.eps * torch.eye(n, device=grad.device, dtype=grad.dtype)
-                    state["G"] += torch.ger(grad_vector, grad_vector)
-
-                if self.enable_logging and self.save_matrix:
-                    if (
-                        epoch is not None and param_idx == 0
-                    ):  # Save only for first parameter to avoid too many files
-                        filename = f"G_matrix_epoch_{epoch+1}_batch_{state['step_count']}_adagram_task_{getattr(self, 'task_name', 'unknown')}.pt"
-                        torch.save(state["G"], os.path.join(self.save_dir, filename))
-
-                # Calculate coefficients
-                g_bar_norm_sq, alpha, beta = self.calculate_coeffs(g_bar)
-
-                # Update P and Q matrices (implemented by subclasses)
-                state["P"], state["Q"], reconstruct_error = self.update_PQ(
-                    state,
-                    beta,
-                    g_bar,
-                )
-
-                if self.enable_logging:
-                    identity = torch.eye(n, device=grad.device, dtype=grad.dtype)
-
-                    state["L_t"] = state["L_t"] @ (
-                        identity + alpha * torch.ger(g_bar, g_bar)
+                            filename = f"G_matrix_epoch_{epoch+1}_batch_{state['step_count']}_adagram_task_{getattr(self, 'task_name', 'unknown')}.pt"
+                            torch.save(state["G"], os.path.join(self.save_dir, filename))
+    
+                    # Calculate coefficients
+                    g_bar_norm_sq, alpha, beta = self.calculate_coeffs(g_bar)
+    
+                    # Update P and Q matrices (implemented by subclasses)
+                    state["P"], state["Q"], reconstruct_error = self.update_PQ(
+                        state,
+                        beta,
+                        g_bar,
                     )
-
-                    eigenvals, eigenvecs = torch.linalg.eigh(state["G"])
-                    sqrt_eigenvals = torch.sqrt(eigenvals)
-
-                    sqr_G = eigenvecs @ torch.diag(sqrt_eigenvals) @ eigenvecs.T
-
-                    v = torch.randn(n, device=grad.device, dtype=grad.dtype)
-                    v = v / torch.norm(v)
-
-                    y_1 = sqr_G @ v
-                    y_2 = state["L_t"] @ v
-
-                    error_norm_sqr = torch.norm(y_1 - y_2) / torch.norm(y_1)
-
-                    result = state["L_t"] @ state["L_t"].T
-                    target = state["G"]
-                    error_norm = torch.norm(torch.abs(target - result)) / torch.norm(target)
-
-                # Increment step counter
-                state["step_count"] += 1
-
-                # Log statistics
-                if self.enable_logging and self.logger:
-                    self.logger.log_optimizer_step(
-                        step_count=state["step_count"],
-                        param_id=param_idx,
-                        grad_vector=grad_vector,
-                        beta=beta,
-                        lr=group["lr"],
-                        error_norm=error_norm,
-                        error_norm_sqrt=error_norm_sqr,
-                        reconstruct_error=reconstruct_error,
-                        state=state,
-                        epoch=epoch,
-                    )
-
-                precond_grad = g_bar / torch.sqrt(1 + g_bar_norm_sq)
-                param_vector.add_(precond_grad, alpha=-group["lr"])
-                p.data = param_vector.reshape(original_shape)
+    
+                    if self.enable_logging:
+                        identity = torch.eye(n, device=grad.device, dtype=grad.dtype)
+    
+                        state["L_t"] = state["L_t"] @ (
+                            identity + alpha * torch.ger(g_bar, g_bar)
+                        )
+    
+                        eigenvals, eigenvecs = torch.linalg.eigh(state["G"])
+                        sqrt_eigenvals = torch.sqrt(eigenvals)
+    
+                        sqr_G = eigenvecs @ torch.diag(sqrt_eigenvals) @ eigenvecs.T
+    
+                        v = torch.randn(n, device=grad.device, dtype=grad.dtype)
+                        v = v / torch.norm(v)
+    
+                        y_1 = sqr_G @ v
+                        y_2 = state["L_t"] @ v
+    
+                        error_norm_sqr = torch.norm(y_1 - y_2) / torch.norm(y_1)
+    
+                        result = state["L_t"] @ state["L_t"].T
+                        target = state["G"]
+                        error_norm = torch.norm(torch.abs(target - result)) / torch.norm(target)
+    
+                    # Increment step counter
+                    state["step_count"] += 1
+    
+                    # Log statistics
+                    if self.enable_logging and self.logger:
+                        self.logger.log_optimizer_step(
+                            step_count=state["step_count"],
+                            param_id=param_idx,
+                            grad_vector=grad_vector,
+                            beta=beta,
+                            lr=group["lr"],
+                            error_norm=error_norm,
+                            error_norm_sqrt=error_norm_sqr,
+                            reconstruct_error=reconstruct_error,
+                            state=state,
+                            epoch=epoch,
+                        )
+    
+    
+                    precond_grad = g_bar / torch.sqrt(1 + g_bar_norm_sq)
+    
+                    
+                    if state["step_count"] == 2:
+                        print("grad", grad_vector)
+                        print("precond grad", precond_grad)
+    
+                    param_vector.add_(precond_grad, alpha=-group["lr"])
+                    p.grad.data = precond_grad
+                    p.data = param_vector.reshape(original_shape)
 
         return loss

@@ -10,7 +10,7 @@ data:
   in_dims: [14]
   out_dims: [2]
   test_size: 0.2
-  data_seeds: [1, 2, 3, 4, 5]
+  data_seeds: [10]
 
 # Global Training Configuration (for settings that apply to ALL runs)
 training:

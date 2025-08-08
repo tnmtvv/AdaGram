@@ -4,6 +4,8 @@ from torchvision import datasets, transforms
 from ucimlrepo import fetch_ucirepo
 import numpy as np
 
+from sklearn.preprocessing import StandardScaler
+
 
 import os
 import pandas as pd
@@ -26,7 +28,7 @@ class Dataset(ABC):
         # Using the provided weight creation strategy which is excellent
         # for creating a complex, non-axis-aligned problem.
         # self.true_weights_mask = self._create_weight_mask()
-        self.true_weights_mask =  self.rng.randn(in_dim, 1)
+        self.true_weights_mask = self.rng.randn(in_dim, 1)
 
     def _create_weight_mask(self, anisotropy_ratio=1e4, seed=42):
         """Creates the ground-truth weight vector that defines the problem."""
@@ -77,11 +79,14 @@ class Dataset(ABC):
         A helper method to get X as a pandas DataFrame and y as a numpy array.
         """
         X_np, y_np = self.create_data()
+
+        # 3. Create the DataFrame using the SCALED data and original feature names
         feature_names = [f'feature_{i}' for i in range(self.in_dim)]
         X_df = pd.DataFrame(X_np, columns=feature_names)
+        # X_df = pd.DataFrame(X_np, columns=feature_names)
         return X_df, y_np
 
-class LogisticAnisotropicDataset(Dataset):
+class CorrelatedAnisotropicDataset(Dataset):
     """
     A concrete implementation that generates a dataset with correlated features,
     which is the key to creating an anisotropic loss landscape for logistic regression.
@@ -96,60 +101,58 @@ class LogisticAnisotropicDataset(Dataset):
         T = np.zeros((self.in_dim, self.in_dim))
         
         # Set the main diagonal
-        diag_values = np.logspace(0, np.log10(anisotropy_ratio), self.in_dim)
+        diag_values = np.logspace(0, np.log(1e3), self.in_dim)
         np.fill_diagonal(T, diag_values)
         
         # Set the upper and lower diagonals
         # We use slicing to handle the arrays of length (in_dim - 1)
+        random_matrix = self.rng.standard_normal(size=(self.in_dim, self.in_dim))
+        rotation_matrix, _ = np.linalg.qr(random_matrix)
+
+        # 3. Apply the rotation to create the final correlated weight vector
+
         upper_diag = T.diagonal(offset=1)
         upper_diag.setflags(write=True)
-        # upper_vals = np.logspace(0, np.log10(1e2), self.in_dim - 1)
-        upper_diag.fill(0.5)
+        upper_vals = np.logspace(0, np.log(1e3), self.in_dim - 1)
+        upper_diag[:] = upper_vals
+        # upper_diag.fill(0.7)
 
         lower_diag = T.diagonal(offset=-1)
         lower_diag.setflags(write=True)
-        # lower_vals = np.logspace(0, np.log10(1e2), self.in_dim - 1)
-        # lower_diag[:] = lower_vals
-        lower_diag.fill(0.7)
+        lower_vals = np.logspace(0, np.log(1e3), self.in_dim - 1)
+        lower_diag[:] = lower_vals
+        # lower_diag.fill(0.5)
+
+        corr = rotation_matrix @ T
 
         # 3. Apply the transformation to create locally correlated features
-        X = Z @ T
+        X = Z @ T 
 
         # 4. Generate the probabilistic logistic regression labels
         y = self._generate_labels(X)
 
-        return torch.tensor(X, dtype=torch.float32), torch.tensor(y.reshape(-1), dtype=torch.long)
+        return X, torch.tensor(y.reshape(-1), dtype=torch.long)
 
 # --- Child Classes (Now Simpler) ---
 
 class IsotropicDataset(Dataset):
     """Generates an Uncorrelated, Isotropic dataset."""
-    def create_data_numpy(self):
+    def create_data(self):
         cov_matrix = np.eye(self.in_dim)
         X = self.rng.multivariate_normal(mean=np.zeros(self.in_dim), cov=cov_matrix, size=self.n_samples)
         y = self._generate_labels(X)
-        return X, y
+        return X, torch.tensor(y.reshape(-1), dtype=torch.long)
+
 
 class AnisotropicDataset(Dataset):
     """Generates an Uncorrelated, Anisotropic dataset."""
-    def create_data_numpy(self, anisotropy_ratio=1e3):
+    def create_data(self, anisotropy_ratio=1e3):
         variances = np.logspace(0, np.log10(anisotropy_ratio), self.in_dim)
         cov_matrix = np.diag(variances)
         X = self.rng.multivariate_normal(mean=np.zeros(self.in_dim), cov=cov_matrix, size=self.n_samples)
         y = self._generate_labels(X)
-        return X, y
+        return X, torch.tensor(y.reshape(-1), dtype=torch.long)
 
-class CorrelatedAnisotropicDataset(Dataset):
-    """Generates a Correlated, Anisotropic dataset."""
-    def create_data_numpy(self, anisotropy_ratio=1e3):
-        variances = np.logspace(0, np.log10(anisotropy_ratio), self.in_dim)
-        anisotropic_cov = np.diag(variances)
-        random_matrix = self.rng.randn(self.in_dim, self.in_dim)
-        rotation_matrix, _ = np.linalg.qr(random_matrix)
-        correlated_cov = rotation_matrix @ anisotropic_cov @ rotation_matrix.T
-        X = self.rng.multivariate_normal(mean=np.zeros(self.in_dim), cov=correlated_cov, size=self.n_samples)
-        y = self._generate_labels(X)
-        return X, y
 
 
 class StudentPerformanceDataset:

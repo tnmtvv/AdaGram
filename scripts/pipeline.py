@@ -11,6 +11,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
 import sys
 import libcontext
 import glob
@@ -24,6 +25,7 @@ from src.adagram_fixed_rank import AdaGramFR
 from src.adagram_vanilla import AdaGramVanilla
 from src.adagram_projector_splitting import AdaGramPS
 from src.shampoo import Shampoo
+from src.torch_adagrad import CustomAdaGrad
 from src.full_G import FullAdaGrad
 from src.kate import KATE
 from src.utils.dataset import (
@@ -37,7 +39,6 @@ from src.utils.dataset import (
     CorrelatedAnisotropicDataset,
     IsotropicDataset, 
     AnisotropicDataset,
-    LogisticAnisotropicDataset,
     CommunitiesAndCrimeDataset,
     StudentPerformanceDataset,
     AIDSDataset
@@ -140,8 +141,8 @@ class ExperimentRunner:
                 out_dim=out_dim,
                 seed=seed,
             )
-        if dataset_type == "LogAniso":
-            return LogisticAnisotropicDataset(
+        if dataset_type == "AnisoDataset":
+            return AnisotropicDataset(
                 n_samples=n_samples,
                 in_dim=in_dim,
                 out_dim=out_dim,
@@ -252,7 +253,7 @@ class ExperimentRunner:
                 params, lr=lr, max_rank=max_rank, eps=eps, enable_logging=testing,
             ),
             "KATE": lambda: KATE(params, lr=lr, eps=eps),
-            "Torch_Adagrad": lambda: torch.optim.Adagrad(params, lr=lr, eps=eps),
+            "Torch_Adagrad": lambda: CustomAdaGrad(params, lr=lr, eps=eps),
             "Shampoo": lambda: Shampoo(params, lr=lr, eps=eps),
             "FullAdaGrad": lambda: FullAdaGrad(params=params, lr=lr, eps=eps),
             "AdaGram": lambda: AdaGramVanilla(params, lr=lr, eps=eps, enable_logging= testing,),
@@ -316,6 +317,7 @@ class ExperimentRunner:
 
                     print("y_pred_train.shape", y_pred_train.shape)
                     print("y_train.shape", y_train.shape)
+
                     train_loss = criterion(y_pred_train, y_train)
                     test_loss = criterion(y_pred_test, y_test)
 
@@ -350,6 +352,7 @@ class ExperimentRunner:
 
                 # Note: The dictionaries created here were not assigned or used.
                 # If they are meant to be logged, they should be appended to self.results.
+            all_grads = {name: [] for name, _ in model.named_parameters()}
 
             # --- Training Loop for One Epoch ---
             for batch_idx, (batch_X, batch_y) in enumerate(tqdm(train_loader, desc="Training")):
@@ -359,14 +362,38 @@ class ExperimentRunner:
                 y_pred = model(batch_X)
                 batch_loss = criterion(y_pred, batch_y)
                 batch_loss.backward()
-
+                
                 if r:
-                    optimizer.step(epoch)
+                    optimizer.step(epoch) 
                 else:
                     optimizer.step()
 
+                # for name, param in model.named_parameters():
+                #     if param.grad is not None:
+                #         all_grads[name].append(param.grad.detach().cpu().numpy())
+
                 epoch_loss += batch_loss.item()
                 num_batches += 1
+
+            # if grad_save_dir:
+            #     # 1. Create the optimizer-specific subdirectory
+            #     optimizer_specific_dir = os.path.join(grad_save_dir, opt_name)
+            #     os.makedirs(optimizer_specific_dir, exist_ok=True)
+
+            #     # 2. Construct a unique filename with all hyperparameter info
+            #     rank_str = f"rank-{r}" if r is not None else "rank-None"
+            #     filename = (
+            #         f"epoch-{epoch+1}_lr-{lr}_eps-{eps}_bs-{batch_size}_"
+            #         f"{rank_str}.npz"
+            #     )
+                
+            #     filepath = os.path.join(optimizer_specific_dir, filename)
+
+            #     # 3. Save the gradients dictionary to a .npy file
+            #     try:
+            #         np.savez_compressed(filepath, **all_grads)
+            #     except Exception as e:
+            #         print(f"Warning: Could not save gradients to {filepath}. Error: {e}")
             
             # --- Metrics Calculation After Each Epoch ---
             with torch.no_grad():
@@ -548,7 +575,8 @@ class ExperimentRunner:
 
                 scaled_dict = {"X true": X}
 
-                print("cond", torch.linalg.cond(X))
+               
+
                 for Xtype in scaled_dict.keys():
 
                     X_train, X_test, y_train, y_test = train_test_split(
@@ -557,6 +585,13 @@ class ExperimentRunner:
                         test_size=self.config.get("data.test_size"),
                         random_state=42,
                     )
+
+                    scaler = StandardScaler()
+                    X_train = torch.tensor(scaler.fit_transform(X_train), dtype=torch.float32)
+                    X_test =  torch.tensor(scaler.transform(X_test), dtype=torch.float32)
+
+
+                    # print("cond", torch.linalg.cond(X_train))
 
                     X_train = X_train.to(self.device)
                     X_test = X_test.to(self.device)
@@ -658,17 +693,16 @@ class ExperimentRunner:
                     df["loss"] = df["loss"].astype(float)
 
                     results_dir = self.config.get("output.results_dir")
-                    filename = f"{task_name}_Tridiag_uni_weights_grid_search_{in_dims[0]}_by_{out_dims[0]}.csv"
+                    filename = f"{task_name}_Corr_Aniso_grid_search_{in_dims[0]}_by_{out_dims[0]}.csv"
                     if results_dir:
                         filepath = os.path.join(results_dir, filename)
                         df.to_csv(filepath)
                     else:
                         raise ValueError("results_dir is None")
 
-
 def main():
     """Main function to run the experiment"""
-    config = Config("./configs/classification/config_Synth_Aniso.yaml")
+    config = Config("./configs/classification/config_Synth_Corr_Aniso.yaml")
     runner = ExperimentRunner(config)
     runner.run_experiment()
 
