@@ -1,0 +1,116 @@
+# Experiment Configuration
+experiment:
+  name: "optimizer_comparison"
+  seed: 42
+
+# Data Configuration
+data:
+  n_samples: 300
+  in_dims: [20]
+  out_dims: [2]
+  test_size: 0.2
+  data_seeds: [1, 2, 3, 4, 5]
+
+# Global Training Configuration (for settings that apply to ALL runs)
+training:
+  num_epochs: 20
+  shuffle: true
+  use_tqdm: true
+
+# Model Configuration
+models:
+  BinClass:
+    model_seed: 100
+    loss_function: "CrossEntropyLoss"
+  LinReg:
+    model_seed: 100
+    loss_function: "MSELoss"
+
+optimizers:
+
+
+
+  FullAdaGrad:
+    enabled: true
+    requires_rank: false
+    # --- FullAdaGrad-specific hyperparameters ---
+    learning_rates: [0.1]
+    batch_size: [32]           # change for gradients
+    eps: [0.1]
+  # --- Other optimizers would follow the same pattern ---
+
+  Shampoo:
+    enabled: false
+    requires_rank: false
+    learning_rates: [0.1, 0.01, 0.05]
+    eps: [0.5, 0.2, 0.1, 0.01]
+    batch_size: [1, 32]
+
+  KATE:
+    enabled: false
+    requires_rank: false
+    # --- KATE-specific hyperparameters would go here ---
+    learning_rates: [0.01]
+    batch_size: [1, 32]
+    eps: [0.5, 0.2, 0.1, 0.01]
+
+  AdaGramPS:
+    enabled: true
+    requires_rank: true
+    testing: false
+    # --- AdaGramPS-specific hyperparameters ---
+    learning_rates: [0.1]
+    batch_size: [1]
+    eps: [1.0]
+    ranks: [4]                                             # Ranks specific to this optimizer
+
+  Torch_Adagrad:
+    enabled: true
+    requires_rank: false
+    # --- Torch Adagrad-specific hyperparameters ---
+    learning_rates: [0.1]                                                      # Adagrad often works well with higher LRs
+    batch_size: [1]
+    eps: [0.5]
+
+  Vanilla_SGD:
+    enabled: true
+    requires_rank: false
+    # --- SGD-specific hyperparameters (note: no 'eps' or 'ranks') ---
+    learning_rates: [0.05]
+    batch_size: [1]
+    eps: [nan]
+
+
+  AdaGramFR_svd:
+    testing: false
+    enabled: false
+    requires_rank: true
+    learning_rates: [0.01]
+    batch_size: [32]
+    eps: [0.01]
+    ranks: [5, 10]
+
+  AdaGram:
+    testing: false
+    enabled: false
+    requires_rank: false
+
+# Output Configuration
+output:
+  results_dir: "results"
+  plots_dir: "plots"
+  gradients_dir: "gradients"
+
+# Tasks Configuration
+tasks:
+  enabled_tasks: ["BinClass"] # Options: ["BinClass", "LinReg"]
+
+# Dataset Configuration
+dataset:
+  type: "AnisoDataset" # Options: SparseDataset, CorrelatedDataset, LinearDataset, MNIST, AU, Heart
+  sparse_config:
+    if_class: true
+  correlated_config:
+    correlation: 0.8
+  linear_config:
+    noise_std: 0.1
