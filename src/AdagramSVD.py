@@ -2,7 +2,7 @@ import torch
 
 from typing import Optional, Dict, Any, Tuple
 
-from src.adagram_base import AdaGram, AdaGramLogger
+from src.AdagramBase import AdaGram, AdaGramLogger
 from line_profiler import profile
 
 
@@ -91,7 +91,7 @@ class AdaGramFR(AdaGram):
                 )
                 state["S"] = torch.diag(state["S"])
 
-                P = state["U"] @ state["S"]
+                P = state["U"] * state["S"]
                 Q = state["V"].T
 
                 if self.enable_logging:

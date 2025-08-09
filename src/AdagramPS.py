@@ -1,7 +1,7 @@
 import torch
 
 from typing import Optional, Dict, Any
-from src.adagram_base import AdaGram, AdaGramLogger
+from src.AdagramBase import AdaGram, AdaGramLogger
 
 from line_profiler import profile
 
@@ -149,7 +149,7 @@ class AdaGramPS(AdaGram):
                 state["U"], state["S"], state["V"] = self.reduce_rank_psi(
                     update, state["U"], state["S"], state["V"]
                 )  # here all the matrices are not transposed
-                state["P"] = state["U"] @ state["S"]
+                state["P"] = state["U"] * state["S"]
 
             if self.enable_logging:
                 state["rec_target"] = prev_matrix + update

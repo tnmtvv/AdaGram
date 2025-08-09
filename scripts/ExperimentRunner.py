@@ -1,7 +1,6 @@
 import os
 import random
 import time
-
 import numpy as np
 import pandas as pd
 
@@ -15,6 +14,8 @@ from sklearn.preprocessing import StandardScaler
 from typing import Optional
 import copy
 import cProfile
+
+import libcontext
 
 from src.utils.Dataset import (
     SparseDataset,
@@ -43,7 +44,7 @@ from src.utils.models import (
     SimpleClassifier,
 )
 
-from .scr.utils import Config
+from src.utils.Config import Config
 
 class ExperimentRunner:
     """Main experiment runner class"""
@@ -57,7 +58,7 @@ class ExperimentRunner:
         if not seed:
             raise ValueError("seed is not defined")
         self.seed_everything(int(seed))
-        self.setup_directories()
+        self._setup_directories()
         self.results = []
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -231,7 +232,7 @@ class ExperimentRunner:
                 
         return loss.item(), accuracy
 
-    def _log_results(self, epoch, elapsed_time, metrics, opt_name, lr, batch_size, r, eps, X_type, data_seed):
+    def _log_results(self, epoch, elapsed_time, metrics, opt_name, lr, batch_size, r, eps,  data_seed):
         """Logs training and testing metrics."""
         train_loss, train_acc, test_loss, test_acc = metrics
         r_in_name = f" rank {r}" if r is not None else ""
@@ -241,7 +242,6 @@ class ExperimentRunner:
             "lr": lr,
             "rank": r,
             "eps": eps,
-            "X_type": X_type,
             "batch_size": batch_size,
             "data_seed": data_seed,
             "epoch_time": elapsed_time,
@@ -266,7 +266,6 @@ class ExperimentRunner:
         lr,
         batch_size,
         eps,
-        X_type,
         stop_condition,
         r=None,
         data_seed=None,
@@ -290,7 +289,7 @@ class ExperimentRunner:
             *self._calculate_metrics(model, criterion, X_train, y_train, if_class),
             *self._calculate_metrics(model, criterion, X_test, y_test, if_class),
         )
-        self._log_results(-1, 0, initial_metrics, opt_name, lr, batch_size, r, eps, X_type, data_seed)
+        self._log_results(-1, 0, initial_metrics, opt_name, lr, batch_size, r, eps, data_seed)
         
         # --- Training Loop ---
         while stop_condition(epoch, start_time):
@@ -314,7 +313,7 @@ class ExperimentRunner:
                 *self._calculate_metrics(model, criterion, X_train, y_train, if_class),
                 *self._calculate_metrics(model, criterion, X_test, y_test, if_class),
             )
-            self._log_results(epoch, elapsed_time, epoch_metrics, opt_name, lr, batch_size, r, eps, X_type, data_seed)
+            self._log_results(epoch, elapsed_time, epoch_metrics, opt_name, lr, batch_size, r, eps, data_seed)
             
             epoch += 1
 
@@ -336,7 +335,6 @@ class ExperimentRunner:
         lr,
         batch_size,
         eps,
-        X_type,
         r=None,
         data_seed=None,
     ):
@@ -349,7 +347,7 @@ class ExperimentRunner:
         
         return self._train_model_stochastic(
             model, optimizer, criterion, X_train, y_train, X_test, y_test,
-            opt_name, lr, batch_size, eps, X_type, stop_condition, r, data_seed
+            opt_name, lr, batch_size, eps, stop_condition, r, data_seed
         )
 
     def train_model_stochastic_time(
@@ -365,7 +363,6 @@ class ExperimentRunner:
         lr,
         batch_size,
         eps,
-        X_type,
         time_budget=60,
         r=None,
         data_seed=None,
@@ -375,7 +372,7 @@ class ExperimentRunner:
 
         return self._train_model_stochastic(
             model, optimizer, criterion, X_train, y_train, X_test, y_test,
-            opt_name, lr, batch_size, eps, X_type, stop_condition, r, data_seed
+            opt_name, lr, batch_size, eps, stop_condition, r, data_seed
         )
 
     def run_experiment(self):
@@ -390,7 +387,7 @@ class ExperimentRunner:
             raise ValueError("data_seeds or dimensions are not defined")
 
         for data_seed in data_seeds:
-            ds = self.get_dataset(in_dims[0], out_dims[0], data_seed)
+            ds = self._get_dataset(in_dims[0], out_dims[0], data_seed)
             if not enabled_tasks:
                 raise ValueError
 
@@ -418,7 +415,7 @@ class ExperimentRunner:
                 print(f"X_train shape: {X_train.shape}")
                 print(f"y_train shape: {y_train.shape}")
 
-                criterion = self._sget_loss_function(task_name)
+                criterion = self._get_loss_function(task_name)
 
                 for opt_name, opt_config in self.config.optimizers.items():
                     if not opt_config["enabled"]:
@@ -440,8 +437,6 @@ class ExperimentRunner:
                     for bs in batches:
                         for lr in learning_rates:
                             for eps in epsilons:
-                                pr = cProfile.Profile()
-                                pr.enable()
                                 if opt_config["requires_rank"]:
                                     # if len(ranks) > 0:
                                     for rank in ranks:
@@ -471,7 +466,6 @@ class ExperimentRunner:
                                             eps=eps,
                                             r=rank,
                                             data_seed=data_seed,
-                                            task_name=task_name,
                                         )
                                 else:
                                     model = copy.deepcopy(base_model).to(self.device)
@@ -492,7 +486,6 @@ class ExperimentRunner:
                                         lr=lr,
                                         batch_size=bs,
                                         data_seed=data_seed,
-                                        task_name=task_name,
                                     )
 
         df = pd.DataFrame(self.results)

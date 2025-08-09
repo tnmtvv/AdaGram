@@ -242,12 +242,6 @@ class AdaGram(Optimizer, ABC):
     
     
                     precond_grad = g_bar / torch.sqrt(1 + g_bar_norm_sq)
-    
-                    
-                    if state["step_count"] == 2:
-                        print("grad", grad_vector)
-                        print("precond grad", precond_grad)
-    
                     param_vector.add_(precond_grad, alpha=-group["lr"])
                     p.grad.data = precond_grad
                     p.data = param_vector.reshape(original_shape)

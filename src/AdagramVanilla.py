@@ -1,7 +1,7 @@
 import torch
 
 from typing import Optional, Dict, Any, Tuple
-from src.adagram_base import AdaGram, AdaGramLogger
+from src.AdagramBase import AdaGram, AdaGramLogger
 
 
 class AdaGramVanilla(AdaGram):
