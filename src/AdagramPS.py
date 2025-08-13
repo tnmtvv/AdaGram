@@ -149,7 +149,7 @@ class AdaGramPS(AdaGram):
                 state["U"], state["S"], state["V"] = self.reduce_rank_psi(
                     update, state["U"], state["S"], state["V"]
                 )  # here all the matrices are not transposed
-                state["P"] = state["U"] * state["S"]
+                state["P"] = state["U"] @ state["S"] # S matrix is not diagonal!
 
             if self.enable_logging:
                 state["rec_target"] = prev_matrix + update

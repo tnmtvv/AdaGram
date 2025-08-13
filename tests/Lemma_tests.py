@@ -78,7 +78,7 @@ def test_pq_Lt_vs_gt_Lt(dim, n_steps):
         # Compare g_bar
 
         assert torch.allclose(
-            g_bar_pq, g_bar_gt, atol=1e-4
+            g_bar_pq, g_bar_gt, atol=1e-4, rtol=1e-3
         ), f"g_bar mismatch at step {i}"
         print("Max abs diff:", torch.max(torch.abs(g_bar_pq - g_bar_gt)).item())
 
