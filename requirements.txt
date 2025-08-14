@@ -1,11 +1,11 @@
 line_profiler==5.0.0
-matplotlib==3.10.5
-numpy==2.3.2
+matplotlib==3.9.4
+numpy==2.0.2
 pandas==2.3.1
 pytest==8.4.1
-PyYAML==6.0.2
 PyYAML==6.0.2
 scikit_learn==1.7.1
 torch==2.5.1
 torchvision==0.20.1
 ucimlrepo==0.0.7
+seaborn==0.13.1
