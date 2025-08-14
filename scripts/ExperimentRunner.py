@@ -424,6 +424,8 @@ class ExperimentRunner:
                     learning_rates = opt_config.get("learning_rates")
                     batches = opt_config.get("batch_size")
                     epsilons = opt_config.get("eps")
+
+                    epsilons = [float(e) for e in epsilons]
                     ranks = opt_config.get("ranks")
 
                     print(f"Running optimizer: {opt_name}")
@@ -440,16 +442,42 @@ class ExperimentRunner:
                                 if opt_config["requires_rank"]:
                                     # if len(ranks) > 0:
                                     for rank in ranks:
-                                        model = copy.deepcopy(base_model)
-                                        print("rank", rank)
+                                        try:
+                                            model = copy.deepcopy(base_model)
+                                            print("rank", rank)
+                                            optimizer = self._get_optimizer(
+                                                opt_name,
+                                                model.parameters(),
+                                                lr=lr,
+                                                eps=eps,
+                                                testing=opt_config["testing"],
+                                                max_rank=rank,
+                                                task=task_name,
+                                            )
+
+                                            self.train_model_stochastic_epochs(
+                                                model=model,
+                                                optimizer=optimizer,
+                                                criterion=criterion,
+                                                X_train=X_train,
+                                                y_train=y_train,
+                                                X_test=X_test,
+                                                y_test=y_test,
+                                                opt_name=opt_name,
+                                                lr=lr,
+                                                batch_size=bs,
+                                                eps=eps,
+                                                r=rank,
+                                                data_seed=data_seed,
+                                            )
+                                        except Exception as e:
+                                            print("Exception ocсured: ", e)
+                                            continue
+                                else:
+                                    try:
+                                        model = copy.deepcopy(base_model).to(self.device)
                                         optimizer = self._get_optimizer(
-                                            opt_name,
-                                            model.parameters(),
-                                            lr=lr,
-                                            eps=eps,
-                                            testing=opt_config["testing"],
-                                            max_rank=rank,
-                                            task=task_name,
+                                            opt_name, model.parameters(), lr, eps
                                         )
 
                                         self.train_model_stochastic_epochs(
@@ -461,32 +489,14 @@ class ExperimentRunner:
                                             X_test=X_test,
                                             y_test=y_test,
                                             opt_name=opt_name,
+                                            eps=eps,
                                             lr=lr,
                                             batch_size=bs,
-                                            eps=eps,
-                                            r=rank,
                                             data_seed=data_seed,
                                         )
-                                else:
-                                    model = copy.deepcopy(base_model).to(self.device)
-                                    optimizer = self._get_optimizer(
-                                        opt_name, model.parameters(), lr, eps
-                                    )
-
-                                    self.train_model_stochastic_epochs(
-                                        model=model,
-                                        optimizer=optimizer,
-                                        criterion=criterion,
-                                        X_train=X_train,
-                                        y_train=y_train,
-                                        X_test=X_test,
-                                        y_test=y_test,
-                                        opt_name=opt_name,
-                                        eps=eps,
-                                        lr=lr,
-                                        batch_size=bs,
-                                        data_seed=data_seed,
-                                    )
+                                    except Exception as e:
+                                        print("Exception ocсured: ", e)
+                                        continue
 
         df = pd.DataFrame(self.results)
         df["loss"] = df["loss"].astype(float)

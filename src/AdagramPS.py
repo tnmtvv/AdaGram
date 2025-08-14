@@ -18,7 +18,7 @@ class AdaGramPS(AdaGram):
         task: str = "LinReg",
         save_dir: str = "matrix_G",
         logger: Optional["AdaGramLogger"] = False,
-        enable_logging: bool = True,
+        enable_logging: bool = False,
         save_matrix: bool = False,
     ):
 
@@ -103,63 +103,63 @@ class AdaGramPS(AdaGram):
             state["P"] = beta_g
             state["Q"] = g_bar_col
 
-        elif self.max_rank is not None and state["P"].shape[1] < self.max_rank:
+
+        elif not self.max_rank or (self.max_rank is not None and state["P"].shape[1] < self.max_rank):
+
+
 
             v_upd = g_bar_col - state["Q"] @ (state["P"].T @ g_bar_col) # update without matrices 
 
             state["P"] = torch.concat([state["P"], beta_g], dim=1)
             state["Q"] = torch.concat([state["Q"], v_upd], dim=1)
-
-        elif not self.max_rank or (
-            self.max_rank is not None and state["P"].shape[1] >= self.max_rank
-        ):
+        
+        elif self.max_rank is not None and state["P"].shape[1] >= self.max_rank:
             if "U" not in state:
-                print("here")
-                Qp, Rp = torch.linalg.qr(state["P"], mode='reduced')
-                Qq, Rq = torch.linalg.qr(state["Q"], mode='reduced')
-                small_matrix = Rp @ Rq.T
-                U_s, S, Vh_s = torch.linalg.svd(small_matrix, full_matrices=False)
-
-                U_s = U_s[:, :self.max_rank]
-                S = S[:self.max_rank]
-                Vh_s = Vh_s[:self.max_rank, :]
-
-                U = Qp @ U_s        # [n, k]
-                V = Qq @ Vh_s.T     # [n, k]
-                state["U"], state["S"], state["V"] = U, S, V
-
-                state["S"] = torch.diag(state["S"])
-                state["U"] = state["U"]
-                state["V"] = state["V"]
+                self._faster_svd(state)
                 reconstruct_error = 0
 
             if self.max_rank == 1:
+
+                if self.enable_logging:
+                    prev_matrix = state["P"] @ state["Q"].T
+
                 update = g_bar
                 state["U"], state["S"], state["V"] = self.one_rank_psi(
                 beta, update, state["U"], state["S"], state["V"]
             ) 
                 state["P"] = state["U"] * state["S"]
-            else:
-                g_p_proj = g_bar @ state["P"]             
-                update = torch.ger(g_bar.mul_(beta), g_bar - state["Q"] @ g_p_proj)
 
+            elif self.max_rank > 0:
+                print("self.max_rank", self.max_rank)
                 if self.enable_logging:
                     prev_matrix = state["P"] @ state["Q"].T
+
+                g_bar_col = g_bar.reshape(-1, 1)
+                g_p_proj = (g_bar @ state["P"]).reshape(-1) 
+
+                update = (beta * g_bar_col) @ (g_bar - g_p_proj @ state["Q"].T).reshape(1, -1)
+
 
                 state["U"], state["S"], state["V"] = self.reduce_rank_psi(
                     update, state["U"], state["S"], state["V"]
                 )  # here all the matrices are not transposed
                 state["P"] = state["U"] @ state["S"] # S matrix is not diagonal!
 
-            if self.enable_logging:
-                state["rec_target"] = prev_matrix + update
-    
-                reconstruct_error = torch.norm(
-                    torch.abs(state["rec_target"] - state["U"] @ state["S"] @ state["V"].T)
-                ) / torch.norm(state["rec_target"])
-                reconstruct_error = 0
-
             
             state["Q"] = state["V"]
+
+            if self.enable_logging:
+                state["rec_target"] = prev_matrix + update
+
+                if self.max_rank > 1:
+                    reconstruct_error = torch.norm(
+                        torch.abs(state["rec_target"] - state["U"] @ state["S"] @ state["V"].T)
+                    ) / torch.norm(state["rec_target"])
+                else:
+                    reconstruct_error = torch.norm(
+                        torch.abs(state["rec_target"] - state["S"] * state["U"] @ state["V"].T)
+                    ) / torch.norm(state["rec_target"])
+
+
 
         return state["P"], state["Q"], reconstruct_error

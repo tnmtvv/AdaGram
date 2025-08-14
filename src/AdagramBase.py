@@ -75,6 +75,25 @@ class AdaGram(Optimizer, ABC):
     ) -> torch.Tensor:
         """Compute beta_t as defined in the theorem."""
         return alpha / (1 + alpha * g_bar_norm_sq)
+    
+    def _faster_svd(self, state):
+        ## faster svd variant with the QR  
+        Qp, Rp = torch.linalg.qr(state["P"], mode='reduced')
+        Qq, Rq = torch.linalg.qr(state["Q"], mode='reduced')
+        small_matrix = Rp @ Rq.T
+        U_s, S, Vh_s = torch.linalg.svd(small_matrix, full_matrices=False)
+
+        U_s = U_s[:, :self.max_rank]
+        S = S[:self.max_rank]
+        Vh_s = Vh_s[:self.max_rank, :]
+
+        U = Qp @ U_s        # [n, k]
+        V = Qq @ Vh_s.T     # [n, k]
+        state["U"], state["S"], state["V"] = U, S, V
+
+        state["S"] = torch.diag(state["S"])
+        state["U"] = state["U"]
+        state["V"] = state["V"]
 
     def initialize(self, state: Dict[str, Any], n: int, grad: torch.Tensor):
         """Initialize optimizer state"""
@@ -84,14 +103,23 @@ class AdaGram(Optimizer, ABC):
         
         state["L_0"] = (np.sqrt(self.eps))
 
-        if self.enable_logging:
+        if self.enable_logging:                  
+            state["G"] = self.eps * torch.eye(n, device=grad.device, dtype=grad.dtype)
             state["L_t"] = state["L_0"] * torch.eye(n, device=grad.device, dtype=grad.dtype)
+
+            result = state["L_t"] @ state["L_t"].T
+            target = state["G"]
+            error_norm = torch.norm(torch.abs(target - result)) / torch.norm(target)
+            print('initial norm', error_norm)
+
+            
+
         state["L_0_inv"] = 1 / state["L_0"]
         state["step_count"] = 0
 
     def update_grad_vector(self, state, grad_vector):
         d = state["L_0_inv"]  # 1D tensor, diagonal entries
-        u = grad_vector.mul_(d)   # elementwise
+        u = grad_vector * d   # elementwise
 
         if "P" in state:
             P, Q = state["P"], state["Q"]
@@ -106,7 +134,7 @@ class AdaGram(Optimizer, ABC):
             return new_g_bar
         else:
             new_g_bar = u.reshape(-1)
-            return u
+            return new_g_bar
 
 
     def calculate_coeffs(
@@ -177,19 +205,6 @@ class AdaGram(Optimizer, ABC):
                     # Update gradient vector
                     g_bar = self.update_grad_vector(state, grad_vector)
     
-                    # Update G matrix
-                    if self.enable_logging:
-                        if "G" not in state:
-                            state["G"] = self.eps * torch.eye(n, device=grad.device, dtype=grad.dtype)
-                        state["G"] += torch.ger(grad_vector, grad_vector)
-    
-                    if self.enable_logging and self.save_matrix:
-                        if (
-                            epoch is not None and param_idx == 0
-                        ):  # Save only for first parameter to avoid too many files
-                            filename = f"G_matrix_epoch_{epoch+1}_batch_{state['step_count']}_adagram_task_{getattr(self, 'task_name', 'unknown')}.pt"
-                            torch.save(state["G"], os.path.join(self.save_dir, filename))
-    
                     g_bar_norm_sq, alpha, beta = self.calculate_coeffs(g_bar)
     
                     # Update P and Q matrices (implemented by subclasses)
@@ -201,10 +216,19 @@ class AdaGram(Optimizer, ABC):
     
                     if self.enable_logging:
                         identity = torch.eye(n, device=grad.device, dtype=grad.dtype)
-    
+
                         state["L_t"] = state["L_t"] @ (
                             identity + alpha * torch.ger(g_bar, g_bar)
                         )
+
+                        state["G"] += torch.ger(grad_vector, grad_vector)
+                        
+                        if self.save_matrix:
+                            if (
+                                epoch is not None and param_idx == 0
+                            ):  
+                                filename = f"G_matrix_epoch_{epoch+1}_batch_{state['step_count']}_adagram_task_{getattr(self, 'task_name', 'unknown')}.pt"
+                                torch.save(state["G"], os.path.join(self.save_dir, filename))
     
                         eigenvals, eigenvecs = torch.linalg.eigh(state["G"])
                         sqrt_eigenvals = torch.sqrt(eigenvals)
@@ -222,6 +246,9 @@ class AdaGram(Optimizer, ABC):
                         result = state["L_t"] @ state["L_t"].T
                         target = state["G"]
                         error_norm = torch.norm(torch.abs(target - result)) / torch.norm(target)
+                        print('inner error norm', error_norm)
+
+
 
                     state["step_count"] += 1
     

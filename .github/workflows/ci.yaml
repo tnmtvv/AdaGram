@@ -1,0 +1,37 @@
+name: Python CI/CD Pipeline
+
+# Trigger the workflow on push or pull request to the main branch
+on:
+  push:
+    branches: [ develop ]
+  pull_request:
+    branches: [ main ]
+
+# Define the jobs to run
+jobs:
+  build-and-test:
+    # Use the latest version of Ubuntu to run the job
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1. Check out the repository's code
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    # 2. Set up a specific version of Python
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    # 3. Install project dependencies
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest-xdist 
+        pip install -r requirements.txt
+    
+    # 4. Run your tests (e.g., using pytest)
+    - name: Run tests
+      run: |
+        pytest -n auto ./tests
