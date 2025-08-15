@@ -105,9 +105,6 @@ class AdaGramPS(AdaGram):
 
 
         elif not self.max_rank or (self.max_rank is not None and state["P"].shape[1] < self.max_rank):
-
-
-
             v_upd = g_bar_col - state["Q"] @ (state["P"].T @ g_bar_col) # update without matrices 
 
             state["P"] = torch.concat([state["P"], beta_g], dim=1)
@@ -130,7 +127,6 @@ class AdaGramPS(AdaGram):
                 state["P"] = state["U"] * state["S"]
 
             elif self.max_rank > 0:
-                print("self.max_rank", self.max_rank)
                 if self.enable_logging:
                     prev_matrix = state["P"] @ state["Q"].T
 
@@ -145,9 +141,6 @@ class AdaGramPS(AdaGram):
                 )  # here all the matrices are not transposed
                 state["P"] = state["U"] @ state["S"] # S matrix is not diagonal!
 
-            
-            state["Q"] = state["V"]
-
             if self.enable_logging:
                 state["rec_target"] = prev_matrix + update
 
@@ -159,6 +152,10 @@ class AdaGramPS(AdaGram):
                     reconstruct_error = torch.norm(
                         torch.abs(state["rec_target"] - state["S"] * state["U"] @ state["V"].T)
                     ) / torch.norm(state["rec_target"])
+            
+            state["Q"] = state["V"]
+
+
 
 
 

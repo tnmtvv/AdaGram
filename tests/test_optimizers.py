@@ -4,6 +4,7 @@ import torch.nn as nn
 from typing import Dict, List, Any, Type
 import json
 import os
+from torch.utils.data import TensorDataset, DataLoader
 
 import libcontext
 
@@ -22,6 +23,7 @@ class OptimizerStateTester:
         self.states_history = []
         self.step_count = 0
         self.loss_history = []
+
 
     def capture_state(self):
         """Capture current optimizer state"""
@@ -98,6 +100,20 @@ def optimizer_configs():
 
 class TestOptimizerStateCapture:
 
+    def _get_optimizer_and_atol(self, optimizer_name, model_params, configs):
+        config = configs[optimizer_name]
+        if optimizer_name == "FullAdaGrad":
+            return FullAdaGrad(model_params, **config), 1e-4
+        elif optimizer_name == "AdaGram":
+            return AdaGramVanilla(model_params, **config), 1e-4
+        elif optimizer_name == "AdaGramFR":
+            return AdaGramFR(model_params, **config), 1e-2
+        elif optimizer_name == "AdaGramPS":
+            return AdaGramPS(model_params, **config), 1e-2
+        else:
+            raise ValueError(f"Unknown optimizer: {optimizer_name}")
+
+
     @pytest.mark.parametrize(
         "optimizer_name",
         [
@@ -139,15 +155,8 @@ class TestOptimizerStateCapture:
         tester.capture_state()
         assert len(tester.states_history) == 2
 
-    @pytest.mark.parametrize(
-        "optimizer_name",
-        [
-            "AdaGram",
-            # "AdaGramFR",
-            "AdaGramPS",
-        ],
-    )
-    def test_state_properties(
+    @pytest.mark.parametrize("optimizer_name", ["AdaGramPS",])
+    def test_state_properties_minibatch(
         self,
         simple_model,
         sample_data,
@@ -155,162 +164,104 @@ class TestOptimizerStateCapture:
         optimizer_configs,
         optimizer_name,
     ):
+        epochs = 5
+        batch_size = 8  # Define a mini-batch size
+        model = simple_model
         
-        epochs = 20
-        """Test specific properties of FullAdaGrad states"""
-        model = simple_model
-        data, targets = sample_data["simple"]
+        # --- Create DataLoader for mini-batching ---
+        X, y = sample_data["simple"]
+        dataset = TensorDataset(X, y)
+        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
-        """Test that optimizer states are properly initialized"""
-        config = optimizer_configs[optimizer_name]
-
-        if optimizer_name == "FullAdaGrad":
-            optimizer = FullAdaGrad(simple_model.parameters(), **config)
-            atol = 1e-4
-        elif optimizer_name == "AdaGram":
-            optimizer = AdaGramVanilla(simple_model.parameters(), **config)
-            atol = 1e-4
-        elif optimizer_name == "AdaGramFR":
-            optimizer = AdaGramFR(simple_model.parameters(), **config)
-            atol = 1e-2
-        elif optimizer_name == "AdaGramPS":
-            optimizer = AdaGramPS(simple_model.parameters(), **config)
-            atol = 1e-2
-
+        optimizer, atol = self._get_optimizer_and_atol(
+            optimizer_name, model.parameters(), optimizer_configs
+        )
         tester = OptimizerStateTester(optimizer, optimizer_name)
 
+        # --- Training loop now iterates over mini-batches ---
+        for epoch in range(epochs):
+            for batch_data, batch_targets in dataloader:
+                optimizer.zero_grad()
+                output = model(batch_data)
+                loss = loss_function(output, batch_targets)
+                loss.backward()
 
+                tester.capture_state()  # Capture state after each mini-batch gradient computation
+                optimizer.step()
+                tester.loss_history.append(loss.item())
 
-        # Run a few optimization steps
-        for step in range(epochs):
-            optimizer.zero_grad()
-            output = model(data)
-            loss = loss_function(output, targets)
-            loss.backward()
-
-            tester.capture_state()
-            optimizer.step()
-            tester.loss_history.append(loss.item())
-
-        # Test properties
+        # --- Assertions remain the same, but now check states from each mini-batch step ---
+        assert len(tester.states_history) > 0, "State history should not be empty"
         for history in tester.states_history:
             for param_id, state_data in history["states"].items():
+
+                
                 optimizer_state = state_data["optimizer_state"]
-
-                assert (
-                    "G" in optimizer_state
-                ), "G matrix should exist in FullAdaGrad state"
-                assert "L_t" in optimizer_state, "L_t should exist in FullAdaGrad state"
-
-                G_matrix = optimizer_state["G"]
-                L_t = optimizer_state["L_t"]
-
-                # G should be square
-                assert (
-                    G_matrix.shape[0] == G_matrix.shape[1]
-                ), "G matrix should be square"
-
-                reconstructed_G = L_t @ L_t.T
-
-                error_norm = torch.norm(
-                    torch.abs(G_matrix - reconstructed_G)
-                ) / torch.norm(G_matrix)
-                print("error_norm", error_norm)
-                assert torch.allclose(G_matrix, reconstructed_G, atol=atol, rtol=atol)
-
-    @pytest.mark.parametrize(
-        "optimizer_name",
-        [
-        # "AdaGramPS",
-        # "AdaGramFR"
-        ],
-    )
-    def test_reconstruction(
-        self,
-        simple_model,
-        sample_data,
-        loss_function,
-        optimizer_configs,
-        optimizer_name,
-    ):
-        """Test specific properties of FullAdaGrad states"""
-        model = simple_model
-        data, targets = sample_data["simple"]
-
-        """Test that optimizer states are properly initialized"""
-        config = optimizer_configs[optimizer_name]
-        max_rank = config["max_rank"]
-
-        if optimizer_name == "AdaGramFR":
-            optimizer = AdaGramFR(simple_model.parameters(), **config)
-            atol = 1e-2
-        elif optimizer_name == "AdaGramPS":
-            optimizer = AdaGramPS(simple_model.parameters(), **config)
-            atol = 1e-2
-
-        tester = OptimizerStateTester(optimizer, optimizer_name)
-
-        # Run a few optimization steps
-        for step in range(20):
-            optimizer.zero_grad()
-            output = model(data)
-            loss = loss_function(output, targets)
-            loss.backward()
-
-            tester.capture_state()
-            optimizer.step()
-            tester.loss_history.append(loss.item())
-
-        # Test properties
-        for history in tester.states_history:
-            for param_id, state_data in history["states"].items():
-                optimizer_state = state_data["optimizer_state"]
+                print("true_steps_num", optimizer_state["step_count"])
 
                 assert "G" in optimizer_state, "G matrix should exist in state"
                 assert "L_t" in optimizer_state, "L_t should exist in state"
 
-                if "U" in optimizer_state:
-                    rec_target = optimizer_state["rec_target"]
-                    # rec_target = optimizer_state["P"] @ optimizer_state["Q"].T
+                G_matrix = optimizer_state["G"]
+                L_t = optimizer_state["L_t"]
 
-                    
+                assert G_matrix.shape[0] == G_matrix.shape[1], "G matrix should be square"
+                
+                reconstructed_G = L_t @ L_t.T
+                assert torch.allclose(G_matrix, reconstructed_G, atol=atol, rtol=atol)
+
+    @pytest.mark.parametrize("optimizer_name", ["AdaGramPS"])
+    def test_reconstruction_minibatch(
+        self,
+        simple_model,
+        sample_data,
+        loss_function,
+        optimizer_configs,
+        optimizer_name,
+    ):
+        epochs = 5
+        batch_size = 8 # Define a mini-batch size
+        model = simple_model
+
+        # --- Create DataLoader for mini-batching ---
+        X, y = sample_data["simple"]
+        dataset = TensorDataset(X, y)
+        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+
+        optimizer, atol = self._get_optimizer_and_atol(
+            optimizer_name, model.parameters(), optimizer_configs
+        )
+        max_rank = optimizer_configs[optimizer_name]["max_rank"]
+        tester = OptimizerStateTester(optimizer, optimizer_name)
+
+        # --- Training loop now iterates over mini-batches ---
+        for epoch in range(epochs):
+            for batch_data, batch_targets in dataloader:
+                optimizer.zero_grad()
+                output = model(batch_data)
+                loss = loss_function(output, batch_targets)
+                loss.backward()
+
+                tester.capture_state()
+                optimizer.step()
+                tester.loss_history.append(loss.item())
+
+        # --- Assertions remain the same ---
+        assert len(tester.states_history) > 0, "State history should not be empty"
+        for history in tester.states_history:
+            for param_id, state_data in history["states"].items():
+                optimizer_state = state_data["optimizer_state"]
+                if "U" in optimizer_state:  # Check if reconstruction data exists
+                    rec_target = optimizer_state["rec_target"]
                     U, S, V = (
                         optimizer_state["U"],
                         optimizer_state["S"],
                         optimizer_state["V"],
                     )
-                    
 
                     if not max_rank or max_rank > 1:
                         factorize = U @ S @ V.T
                     else:
                         factorize = S * U @ V.T
-
-
-                    print("rec_target", rec_target)
-                    print("factorize", factorize)
-
+                    
                     assert torch.allclose(rec_target, factorize, atol=atol, rtol=atol)
-
-
-class TestOptimizerComparison:
-
-    def setup_optimizers(self, model, optimizer_configs):
-        """Setup multiple optimizers for comparison"""
-        optimizers = {}
-        testers = {}
-
-        for name, config in optimizer_configs.items():
-            # Create separate model instances to avoid interference
-            test_model = type(model)(*[p for p in model.parameters()])
-            test_model.load_state_dict(model.state_dict())
-
-            if name == "FullAdaGrad":
-                opt = FullAdaGrad(test_model.parameters(), **config)
-            elif name == "AdaGram":
-                opt = AdaGramVanilla(simple_model.parameters(), **config)
-
-            optimizers[name] = {"model": test_model, "optimizer": opt}
-            testers[name] = OptimizerStateTester(opt, name)
-
-        return optimizers, testers

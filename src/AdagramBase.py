@@ -83,9 +83,10 @@ class AdaGram(Optimizer, ABC):
         small_matrix = Rp @ Rq.T
         U_s, S, Vh_s = torch.linalg.svd(small_matrix, full_matrices=False)
 
-        U_s = U_s[:, :self.max_rank]
-        S = S[:self.max_rank]
-        Vh_s = Vh_s[:self.max_rank, :]
+        if self.max_rank is not None:
+            U_s = U_s[:, :self.max_rank]
+            S = S[:self.max_rank]
+            Vh_s = Vh_s[:self.max_rank, :]
 
         U = Qp @ U_s        # [n, k]
         V = Qq @ Vh_s.T     # [n, k]
@@ -246,7 +247,6 @@ class AdaGram(Optimizer, ABC):
                         result = state["L_t"] @ state["L_t"].T
                         target = state["G"]
                         error_norm = torch.norm(torch.abs(target - result)) / torch.norm(target)
-                        print('inner error norm', error_norm)
 
 
 

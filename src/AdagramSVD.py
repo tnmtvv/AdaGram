@@ -49,6 +49,7 @@ class AdaGramFR(AdaGram):
             return U_k, S_k, V_k.T
         else:
             return U, S, Vh.T
+    
     @profile
     def update_PQ(
         self,
@@ -65,32 +66,29 @@ class AdaGramFR(AdaGram):
             Q = g_bar_col
             reconstruct_error = torch.tensor(0.0)
 
-        elif not self.max_rank or (self.max_rank is not None and state["P"].shape[1] < self.max_rank):
-
-            v_upd = g_bar_col - state["Q"] @ (state["P"].T @ g_bar_col) # update without matrices 
+        else:
+            v_upd = (g_bar_col - state["Q"] @ (state["P"].T @ g_bar_col)) # update without matrices 
 
             P = torch.concat([state["P"], beta_g], dim=1)
             Q = torch.concat([state["Q"], v_upd], dim=1)
 
             reconstruct_error = torch.tensor(0.0)
 
-        elif self.max_rank is not None and state["P"].shape[1] >= self.max_rank:
-                
-                self._faster_svd(state)
-                # state["U"], state["S"], state["V"] = self.reduce_rank_svd(state["P"] @ state["Q"].T, self.max_rank)
-                # state["S"] = torch.diag(state["S"])
+            if self.max_rank is not None and state["P"].shape[1] > self.max_rank:
+                    self._faster_svd(state)
 
-                if self.enable_logging:
-                    state["rec_target"] = state["P"] @ state["Q"].T
+                    if self.enable_logging:
+                        state["rec_target"] = state["P"] @ state["Q"].T
 
-                    reconstruct_error = torch.norm(
-                        torch.abs(
-                            state["rec_target"] - state["U"] @ state["S"] @ state["V"].T
-                        )
-                    ) / torch.norm(state["rec_target"])
+                        reconstruct_error = torch.norm(
+                            torch.abs(
+                                state["rec_target"] - (state["U"] @ state["S"] @ state["V"].T)
+                            )
+                        ) / torch.norm(state["rec_target"])
 
-                P = state["U"] @ state["S"]
-                Q = state["V"]
+
+                    P = state["U"] @ state["S"]
+                    Q = state["V"]
 
 
 

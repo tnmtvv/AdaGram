@@ -101,31 +101,22 @@ class CorrelatedAnisotropicDataset(Dataset):
         T = np.zeros((self.in_dim, self.in_dim))
         
         # Set the main diagonal
-        diag_values = np.logspace(0, np.log(1e3), self.in_dim)
+        rng = np.random.default_rng(42)
+        diag_values = list(100 + rng.integers(0, 50, size=self.in_dim))
         np.fill_diagonal(T, diag_values)
-        
-        # Set the upper and lower diagonals
-        # We use slicing to handle the arrays of length (in_dim - 1)
-        random_matrix = self.rng.standard_normal(size=(self.in_dim, self.in_dim))
-        rotation_matrix, _ = np.linalg.qr(random_matrix)
 
         # 3. Apply the rotation to create the final correlated weight vector
-
         upper_diag = T.diagonal(offset=1)
         upper_diag.setflags(write=True)
-        upper_vals = np.logspace(0, np.log(1e3), self.in_dim - 1)
+        upper_vals = list(100 + rng.integers(0, 50, size=self.in_dim - 1))
         upper_diag[:] = upper_vals
         # upper_diag.fill(0.7)
 
         lower_diag = T.diagonal(offset=-1)
         lower_diag.setflags(write=True)
-        lower_vals = np.logspace(0, np.log(1e3), self.in_dim - 1)
+        lower_vals = list(100 + rng.integers(0, 50, size=self.in_dim - 1))
         lower_diag[:] = lower_vals
-        # lower_diag.fill(0.5)
 
-        corr = rotation_matrix @ T
-
-        # 3. Apply the transformation to create locally correlated features
         X = Z @ T 
 
         # 4. Generate the probabilistic logistic regression labels
