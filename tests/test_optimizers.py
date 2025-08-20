@@ -93,8 +93,8 @@ def optimizer_configs():
     """Configuration for different optimizers"""
     return {
         "AdaGram": {"lr": 0.1, "eps": 1e-4, "enable_logging": True},
-        "AdaGramFR": {"lr": 0.1, "eps": 1e-2, "max_rank": 10, "enable_logging": True},
-        "AdaGramPS": {"lr": 0.1, "eps": 1e-2, "max_rank": 10, "enable_logging": True},
+        "AdaGramFR": {"lr": 0.1, "eps": 1e-2, "max_rank": None, "enable_logging": True},
+        "AdaGramPS": {"lr": 0.1, "eps": 1e-2, "max_rank": None, "enable_logging": True},
     }
 
 
@@ -155,7 +155,7 @@ class TestOptimizerStateCapture:
         tester.capture_state()
         assert len(tester.states_history) == 2
 
-    @pytest.mark.parametrize("optimizer_name", ["AdaGramPS",])
+    @pytest.mark.parametrize("optimizer_name", ["AdaGramFR", "AdaGramPS"])
     def test_state_properties_minibatch(
         self,
         simple_model,
@@ -210,7 +210,7 @@ class TestOptimizerStateCapture:
                 reconstructed_G = L_t @ L_t.T
                 assert torch.allclose(G_matrix, reconstructed_G, atol=atol, rtol=atol)
 
-    @pytest.mark.parametrize("optimizer_name", ["AdaGramPS"])
+    @pytest.mark.parametrize("optimizer_name", ["AdaGramFR", "AdaGramPS"])
     def test_reconstruction_minibatch(
         self,
         simple_model,

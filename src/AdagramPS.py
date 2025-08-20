@@ -15,6 +15,7 @@ class AdaGramPS(AdaGram):
         eps: float = 1e-10,
         weight_decay: float = 0,
         max_rank: Optional[int] = None,
+        alpha = None,
         task: str = "LinReg",
         save_dir: str = "matrix_G",
         logger: Optional["AdaGramLogger"] = False,
@@ -36,9 +37,15 @@ class AdaGramPS(AdaGram):
         )
         self.save_dir = save_dir
         self.task_name = task
+        self.alpha = alpha
 
     @profile
     def reduce_rank_psi(self, delta_A, U_0, S_0, V_0):
+        if self.alpha:
+            S_0 = self.alpha * S_0
+            delta_A = (1 - self.alpha) * delta_A
+            
+            print("alpha", self.alpha)
         K_cur = U_0 @ S_0 + delta_A @ V_0
         U_cur, S_hat = torch.linalg.qr(K_cur)
         S_tild = S_hat - U_cur.T @ (delta_A @ V_0)
@@ -55,6 +62,11 @@ class AdaGramPS(AdaGram):
         s = s.flatten()
         v = v.flatten()
 
+        if self.alpha:
+            alpha = self.alpha 
+        else: 
+            alpha = 0.5 
+
         # Precompute scalar products
         gu = torch.dot(g, s * u)       # P = u*s
         gv = torch.dot(g, v)           # g^T v
@@ -65,6 +77,9 @@ class AdaGramPS(AdaGram):
         delta_av = const * g           # Vector
 
         # Compute K and norm efficiently
+        s = alpha * s
+        delta_av = (1 - alpha) * delta_av
+
         K_cur = u * s + delta_av       # Vector
         K_norm = torch.sqrt(torch.dot(K_cur, K_cur))     # Scalar
 

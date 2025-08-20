@@ -183,6 +183,7 @@ class ExperimentRunner:
         eps: float,
         testing: bool = False,
         max_rank: Optional[int] = None,
+        alpha = None,
         task: str = "LinReg",
     ):
         
@@ -195,6 +196,17 @@ class ExperimentRunner:
                 max_rank=max_rank,
                 task=task,
                 eps=eps,
+                alpha = alpha,
+                enable_logging= testing,
+                save_dir="matrix_G",
+            ),
+            "AdaGramPS_fullrank": lambda: AdaGramPS(
+                params=params,
+                lr=lr,
+                max_rank=None,
+                task=task,
+                eps=eps,
+                alpha = alpha,
                 enable_logging= testing,
                 save_dir="matrix_G",
             ),
@@ -219,23 +231,30 @@ class ExperimentRunner:
     # ------ Logic -------
 
     def _calculate_metrics(self, model, criterion, X, y, if_class):
-        """Calculates loss and accuracy for a given dataset."""
+        """Calculates loss, accuracy (if classification), and RMSE (if regression) for a given dataset."""
         with torch.no_grad():
             y_pred = model(X)
             loss = criterion(y_pred, y)
-            
-            accuracy = 0
+
+            accuracy = None
+            rmse = None
+
             if if_class:
+                # Classification branch
                 y_pred_probs = torch.softmax(y_pred, dim=1)
                 predicted_labels = torch.argmax(y_pred_probs, dim=1)
                 accuracy = (predicted_labels == y).float().mean().item()
-                
-        return loss.item(), accuracy
+            else:
+                # Regression branch → compute RMSE
+                mse = torch.mean((y_pred.squeeze() - y.float().squeeze()) ** 2)
+                rmse = torch.sqrt(mse).item()
 
-    def _log_results(self, epoch, elapsed_time, metrics, opt_name, lr, batch_size, r, eps,  data_seed):
+        return loss.item(), accuracy, rmse
+
+    def _log_results(self, epoch, elapsed_time, metrics, opt_name, lr, alpha, batch_size, r, eps,  data_seed):
         """Logs training and testing metrics."""
-        train_loss, train_acc, test_loss, test_acc = metrics
-        r_in_name = f" rank {r}" if r is not None else ""
+        train_loss, train_acc, train_rmse, test_loss, test_acc, test_rmse = metrics
+        r_in_name = f" rank {r}" if r is not None and len(opt_name.split(' ')) < 2 else ""
         
         common_info = {
             "optimizer": opt_name + r_in_name,
@@ -246,11 +265,12 @@ class ExperimentRunner:
             "data_seed": data_seed,
             "epoch_time": elapsed_time,
             "avg_epoch_time": elapsed_time / (epoch + 1) if epoch > -1 else 0,
+            "alpha": alpha
         }
 
         self.results.extend([
-            {**common_info, "epoch": epoch + 1, "loss": test_loss, "accuracy": test_acc, "mode": "test"},
-            {**common_info, "epoch": epoch + 1, "loss": train_loss, "accuracy": train_acc, "mode": "train"},
+            {**common_info, "epoch": epoch + 1, "loss": test_loss, "accuracy": test_acc,  "rmse": test_rmse, "mode": "test"},
+            {**common_info, "epoch": epoch + 1, "loss": train_loss, "accuracy": train_acc, "rmse": train_rmse, "mode": "train"},
         ])
 
     def _train_model_stochastic(
@@ -264,6 +284,7 @@ class ExperimentRunner:
         y_test,
         opt_name,
         lr,
+        alpha,
         batch_size,
         eps,
         stop_condition,
@@ -289,7 +310,7 @@ class ExperimentRunner:
             *self._calculate_metrics(model, criterion, X_train, y_train, if_class),
             *self._calculate_metrics(model, criterion, X_test, y_test, if_class),
         )
-        self._log_results(-1, 0, initial_metrics, opt_name, lr, batch_size, r, eps, data_seed)
+        self._log_results(-1, 0, initial_metrics, opt_name, lr, alpha, batch_size, r, eps, data_seed)
         
         # --- Training Loop ---
         while stop_condition(epoch, start_time):
@@ -313,13 +334,13 @@ class ExperimentRunner:
                 *self._calculate_metrics(model, criterion, X_train, y_train, if_class),
                 *self._calculate_metrics(model, criterion, X_test, y_test, if_class),
             )
-            self._log_results(epoch, elapsed_time, epoch_metrics, opt_name, lr, batch_size, r, eps, data_seed)
+            self._log_results(epoch, elapsed_time, epoch_metrics, opt_name, lr, alpha, batch_size, r, eps, data_seed)
             
             epoch += 1
 
         # --- Final Evaluation ---
         model.eval()
-        final_test_loss, _ = self._calculate_metrics(model, criterion, X_test, y_test, if_class)
+        final_test_loss, _, _ = self._calculate_metrics(model, criterion, X_test, y_test, if_class)
         return final_test_loss
 
     def train_model_stochastic_epochs(
@@ -333,6 +354,7 @@ class ExperimentRunner:
         y_test,
         opt_name,
         lr,
+        alpha,
         batch_size,
         eps,
         r=None,
@@ -347,7 +369,7 @@ class ExperimentRunner:
         
         return self._train_model_stochastic(
             model, optimizer, criterion, X_train, y_train, X_test, y_test,
-            opt_name, lr, batch_size, eps, stop_condition, r, data_seed
+            opt_name, lr, alpha,batch_size, eps, stop_condition, r, data_seed
         )
 
     def train_model_stochastic_time(
@@ -424,8 +446,10 @@ class ExperimentRunner:
                     learning_rates = opt_config.get("learning_rates")
                     batches = opt_config.get("batch_size")
                     epsilons = opt_config.get("eps")
+                    
 
                     epsilons = [float(e) for e in epsilons]
+                    learning_rates = [float(lr) for lr in learning_rates]
                     ranks = opt_config.get("ranks")
 
                     print(f"Running optimizer: {opt_name}")
@@ -440,45 +464,52 @@ class ExperimentRunner:
                         for lr in learning_rates:
                             for eps in epsilons:
                                 if opt_config["requires_rank"]:
-                                    # if len(ranks) > 0:
+                                    alphas = opt_config.get("alphas")
+                                    if not alphas:
+                                        alphas = [None]
                                     for rank in ranks:
-                                        try:
-                                            model = copy.deepcopy(base_model)
-                                            print("rank", rank)
-                                            optimizer = self._get_optimizer(
-                                                opt_name,
-                                                model.parameters(),
-                                                lr=lr,
-                                                eps=eps,
-                                                testing=opt_config["testing"],
-                                                max_rank=rank,
-                                                task=task_name,
-                                            )
+                                        for alpha in alphas: 
+                                            try:
+                                                model = copy.deepcopy(base_model)
+                                                print("rank", rank)
+                                                base_opt_name = opt_name.split(' ')[0]
+                                                optimizer = self._get_optimizer(
+                                                    base_opt_name,
+                                                    model.parameters(),
+                                                    lr=lr,
+                                                    eps=eps,
+                                                    testing=opt_config["testing"],
+                                                    alpha = alpha,
+                                                    max_rank=rank,
+                                                    task=task_name,
+                                                )
 
-                                            self.train_model_stochastic_epochs(
-                                                model=model,
-                                                optimizer=optimizer,
-                                                criterion=criterion,
-                                                X_train=X_train,
-                                                y_train=y_train,
-                                                X_test=X_test,
-                                                y_test=y_test,
-                                                opt_name=opt_name,
-                                                lr=lr,
-                                                batch_size=bs,
-                                                eps=eps,
-                                                r=rank,
-                                                data_seed=data_seed,
-                                            )
-                                        except Exception as e:
-                                            print("Exception ocсured: ", e)
-                                            continue
+                                                self.train_model_stochastic_epochs(
+                                                    model=model,
+                                                    optimizer=optimizer,
+                                                    criterion=criterion,
+                                                    X_train=X_train,
+                                                    y_train=y_train,
+                                                    X_test=X_test,
+                                                    y_test=y_test,
+                                                    opt_name=opt_name,
+                                                    lr=lr,
+                                                    alpha=alpha,
+                                                    batch_size=bs,
+                                                    eps=eps,
+                                                    r=rank,
+                                                    data_seed=data_seed,
+                                                )
+                                            except Exception as e:
+                                                print("Exception ocсured: ", e)
+                                                continue
                                 else:
                                     try:
                                         model = copy.deepcopy(base_model).to(self.device)
                                         optimizer = self._get_optimizer(
                                             opt_name, model.parameters(), lr, eps
                                         )
+                                        alpha = None
 
                                         self.train_model_stochastic_epochs(
                                             model=model,
@@ -491,6 +522,7 @@ class ExperimentRunner:
                                             opt_name=opt_name,
                                             eps=eps,
                                             lr=lr,
+                                            alpha=None,
                                             batch_size=bs,
                                             data_seed=data_seed,
                                         )
