@@ -5,14 +5,14 @@ import argparse
 from ExperimentRunner import ExperimentRunner
 from src.utils.Config import Config
 
-def main(config_path, output_filename):
+def main(config_path, mode, output_filename):
     """Main function to run the experiment."""
     
     print(f"Loading configuration from: {config_path}")
     config = Config(config_path)
     
     print("Initializing ExperimentRunner...")
-    runner = ExperimentRunner(config)
+    runner = ExperimentRunner(config, mode)
     
     print("Running experiment...")
     runner.run_experiment()
@@ -50,6 +50,13 @@ if __name__ == "__main__":
         help="Path to the YAML configuration file for the experiment."
     )
 
+    parser.add_argument(
+        "--mode",
+        type=str,
+        default="epochs",
+        help="Mode for an experiment"
+    )
+
     # Argument for the output filename.
     parser.add_argument(
         "--output",
@@ -60,4 +67,4 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    main(config_path=args.config, output_filename=args.output)
+    main(config_path=args.config, mode=args.mode, output_filename=args.output)

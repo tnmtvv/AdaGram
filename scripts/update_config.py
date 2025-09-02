@@ -64,7 +64,7 @@ def find_and_update_best_params(df_grid_search, config_path):
 
     # Sort based on classification (accuracy) or regression (rmse)
     if config.get("dataset", {}).get("sparse_config", {}).get("if_class", False):
-        df_sorted = df_test.sort_values(by=['accuracy', 'epoch'], ascending=[False, True])
+        df_sorted = df_test.sort_values(by=['epoch', 'loss'], ascending=[False, True])
         metric_col = 'accuracy'
     else:
         df_sorted = df_test.sort_values(by=['rmse', 'epoch'], ascending=[True, True])

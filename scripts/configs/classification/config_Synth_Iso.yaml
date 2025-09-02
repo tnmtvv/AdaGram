@@ -1,27 +1,23 @@
 # Experiment Configuration
 experiment:
   name: "optimizer_comparison"
-  seed: 42
+  seeds: [10]
 
 # Data Configuration
 data:
   n_samples: 300
-  in_dims: [20]
+  in_dims: [14]
   out_dims: [2]
   test_size: 0.2
-  data_seeds:
-  - 1
-  - 2
-  - 3
-  - 4
-  - 5
-  - 10
 
 # Global Training Configuration (for settings that apply to ALL runs)
 training:
   num_epochs: 20
   shuffle: true
-  use_tqdm: true
+  use_tqdm: 
+  time_budget: 50
+  patience: 5
+
 
 # Model Configuration
 models:
@@ -32,240 +28,69 @@ models:
     model_seed: 100
     loss_function: "MSELoss"
 
+# Optimizer Configuration (with specific hyperparameters for each)
 optimizers:
   FullAdaGrad:
-    enabled: true
+    enabled: false
     requires_rank: false
     # --- FullAdaGrad-specific hyperparameters ---
-    learning_rates:
-    - 0.01
-    batch_size:                          # change for gradients
-    - 64
-    eps:
-    - 1e-05
+    learning_rates: [1e-3, 1e-4, 1e-5]
+    batch_size: [1, 32, 64]              # change for gradients
+    eps: [1e-3, 1e-4, 1e-5, 1e-2, 0.1, 0.5]
   # --- Other optimizers would follow the same pattern ---
 
   AdaGramPS:
-    enabled: false
+    enabled: true
     requires_rank: true
     testing: false
     # --- AdaGramPS-specific hyperparameters ---
-    learning_rates: [1e-3, 1e-4, 1e-5, 1e-2]
+    learning_rates: [1e-2, 1e-3, 1e-4, 1e-5]
     batch_size: [1, 32, 64]
     eps: [1e-3, 1e-4, 1e-5, 1e-2, 0.1, 0.5]
     ranks: [1, 2, 3, 4, 5, null]
-    alphas: [1.0, 0.2, 0.5, 0.8, 0]
+    alphas: [1, 0, 0.2, 0.5, 0.8]
 
   Shampoo:
     enabled: true
     requires_rank: false
-    learning_rates:
-    - 0.01
-    eps:
-    - 0.001
-    batch_size:
-    - 1
+    learning_rates: [1e-2, 1e-3, 1e-4, 1e-5]
+    eps: [1e-3, 1e-4, 1e-5, 1e-2, 0.1, 0.5]
+    batch_size: [1, 32, 64]
 
   KATE:
     enabled: true
     requires_rank: false
     # --- KATE-specific hyperparameters would go here ---
-    learning_rates:
-    - 0.01
-    batch_size:
-    - 64
-    eps:
-    - 0.001
+    learning_rates: [1e-2, 1e-3, 1e-4, 1e-5]
+    batch_size: [1, 32, 64]
+    eps: [1e-3, 1e-4, 1e-5, 1e-2, 0.1, 0.5]
 
 
   Torch_Adagrad:
     enabled: true
     requires_rank: false
     # --- Torch Adagrad-specific hyperparameters ---
-    learning_rates:                                                                                         # Adagrad often works well with higher LRs
-    - 0.01
-    batch_size:
-    - 1
-    eps:
-    - 0.1
+    learning_rates: [1e-2, 1e-3, 1e-4, 1e-5]                                                               # Adagrad often works well with higher LRs
+    batch_size: [1, 32, 64]
+    eps: [1e-3, 1e-4, 1e-5, 1e-2, 0.1, 0.5]
 
   Vanilla_SGD:
     enabled: true
     requires_rank: false
     # --- SGD-specific hyperparameters (note: no 'eps' or 'ranks') ---
-    learning_rates:
-    - 0.01
-    batch_size:
-    - 1
+    learning_rates: [1e-2, 1e-3, 1e-4, 1e-5]    
+    batch_size: [1, 32, 64]
     eps: [nan]
 
-
   AdaGramFR_svd:
-    enabled: false
+    enabled: true
     requires_rank: true
     testing: false
     # --- AdaGramPS-specific hyperparameters ---
-    learning_rates: [1e-3, 1e-4, 1e-5, 1e-2]
+    learning_rates: [1e-2, 1e-3, 1e-4, 1e-5, 1e-2]
     batch_size: [1, 32, 64]
-    eps: [1e-05]
+    eps: [1e-3, 1e-4, 1e-5, 1e-2, 0.1, 0.5]
     ranks: [1, 2, 3, 4, 5, null]
-  AdaGramPS rank 3:
-    enabled: true
-    testing: false
-    requires_rank: true
-    learning_rates:
-    - 0.01
-    batch_size:
-    - 1
-    alphas:
-    - 0.0
-    eps:
-    - 0.1
-    ranks:
-    - 3
-  AdaGramPS rank 2:
-    enabled: true
-    testing: false
-    requires_rank: true
-    learning_rates:
-    - 0.01
-    batch_size:
-    - 1
-    alphas:
-    - 0.0
-    eps:
-    - 0.1
-    ranks:
-    - 2
-  AdaGramPS rank 1:
-    enabled: true
-    testing: false
-    requires_rank: true
-    learning_rates:
-    - 0.01
-    batch_size:
-    - 1
-    alphas:
-    - 0.2
-    eps:
-    - 0.5
-    ranks:
-    - 1
-  AdaGramPS rank 4:
-    enabled: true
-    testing: false
-    requires_rank: true
-    learning_rates:
-    - 0.01
-    batch_size:
-    - 1
-    alphas:
-    - 0.2
-    eps:
-    - 0.5
-    ranks:
-    - 4
-  AdaGramPS rank 5:
-    enabled: true
-    testing: false
-    requires_rank: true
-    learning_rates:
-    - 0.01
-    batch_size:
-    - 1
-    alphas:
-    - 0.2
-    eps:
-    - 0.5
-    ranks:
-    - 5
-  AdaGramFR_svd rank 5:
-    enabled: true
-    testing: false
-    requires_rank: true
-    learning_rates:
-    - 0.01
-    batch_size:
-    - 1
-    eps:
-    - 1e-05
-    ranks:
-    - 5
-  AdaGramFR_svd rank 2:
-    enabled: true
-    testing: false
-    requires_rank: true
-    learning_rates:
-    - 0.01
-    batch_size:
-    - 1
-    eps:
-    - 1e-05
-    ranks:
-    - 2
-  AdaGramFR_svd rank 3:
-    enabled: true
-    testing: false
-    requires_rank: true
-    learning_rates:
-    - 0.01
-    batch_size:
-    - 1
-    eps:
-    - 1e-05
-    ranks:
-    - 3
-  AdaGramFR_svd rank 1:
-    enabled: true
-    testing: false
-    requires_rank: true
-    learning_rates:
-    - 0.01
-    batch_size:
-    - 1
-    eps:
-    - 1e-05
-    ranks:
-    - 1
-  AdaGramFR_svd rank 4:
-    enabled: true
-    testing: false
-    requires_rank: true
-    learning_rates:
-    - 0.01
-    batch_size:
-    - 1
-    eps:
-    - 1e-05
-    ranks:
-    - 4
-  AdaGramPS_fullrank:
-    enabled: true
-    testing: false
-    requires_rank: true
-    learning_rates:
-    - 0.01
-    batch_size:
-    - 1
-    alphas:
-    - 1.0
-    eps:
-    - 0.5
-    ranks:
-    - 
-  AdaGramFR_svd_fullrank:
-    enabled: true
-    testing: false
-    requires_rank: true
-    learning_rates:
-    - 0.01
-    batch_size:
-    - 1
-    eps:
-    - 1e-05
-    ranks:
-    - 
-
 
 # Output Configuration
 output:
