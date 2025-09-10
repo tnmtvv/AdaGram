@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "adagram_optimizers"
+version = "0.1.0"
+description = "A collection of adaptive gradient optimization algorithms for deep learning."
+authors = [ { name="tnmtvv", email="tanya.m.0117oliv@gmail.com"} ]
+requires-python = ">=3.8"
+
+# Core dependencies required for the library to function
+dependencies = [
+    "numpy>=2.0",
+    "PyYAML>=6.0",
+    "scikit-learn>=1.6",
+    "torch>=2.5",
+    "torchvision>=0.20",
+    "ucimlrepo>=0.0.7",
+]
+
+# Optional dependencies for development, testing, and visualization
+# Install with: pip install .[dev,viz]
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.4",
+    "line-profiler>=5.0",
+]
+viz = [
+    "matplotlib>=3.9",
+    "pandas>=2.3",
+    "seaborn>=0.13",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
