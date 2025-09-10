@@ -18,7 +18,7 @@ import cProfile
 
 import libcontext
 
-from src.utils.Dataset import (
+from src.adagram_optimizers.utils.Dataset import (
     SparseDataset,
     MNISTDataWrapper,
     SpliceDataset,
@@ -32,21 +32,21 @@ from src.utils.Dataset import (
     AIDSDataset
 )
 
-from src.AdagramSVD import AdaGramFR
-from src.AdagramVanilla import AdaGramVanilla
-from src.AdagramPS import AdaGramPS
-from src.Shampoo import Shampoo
-from src.DiagAdagrad import CustomAdaGrad
-from src.FullAdagrad import FullAdaGrad
-from src.Kate import KATE
+from src.adagram_optimizers.AdagramSVD import AdaGramFR
+from src.adagram_optimizers.AdagramVanilla import AdaGramVanilla
+from src.adagram_optimizers.AdagramPS import AdaGramPS
+from src.adagram_optimizers.Shampoo import Shampoo
+from src.adagram_optimizers.DiagAdagrad import CustomAdaGrad
+from src.adagram_optimizers.FullAdagrad import FullAdaGrad
+from src.adagram_optimizers.Kate import KATE
 
-from src.utils.models import (
+from src.adagram_optimizers.utils.models import (
     LinearRegressionModel,
     SimpleClassifier,
 )
 
-from src.utils.Config import Config
-from src.utils.Trainer import Trainer
+from src.adagram_optimizers.utils.Config import Config
+from src.adagram_optimizers.utils.Trainer import Trainer
 
 class ExperimentRunner:
     """Orchestrates the overall experiment, delegating training to the Trainer class."""

@@ -6,7 +6,7 @@ import os
 from typing import Optional, Dict, Any, Tuple
 from abc import ABC
 
-from src.utils.Logger import AdaGramLogger
+from src.adagram_optimizers.utils.Logger import AdaGramLogger
 
 from line_profiler import profile
 
@@ -113,8 +113,7 @@ class AdaGram(Optimizer, ABC):
             error_norm = torch.norm(torch.abs(target - result)) / torch.norm(target)
             print('initial norm', error_norm)
 
-            
-
+        
         state["L_0_inv"] = 1 / state["L_0"]
         state["step_count"] = 0
 
@@ -136,6 +135,41 @@ class AdaGram(Optimizer, ABC):
         else:
             new_g_bar = u.reshape(-1)
             return new_g_bar
+
+    def update_grad_vector_sym(self, state, grad_vector):
+        d = state["L_0_inv"]  # 1D tensor, diagonal entries
+        u = grad_vector * d   # elementwise
+
+        if "P" in state:
+            P, Q = state["P"], state["Q"]
+            if len(u.shape) == 1:
+                u = u.view(-1, 1)
+            x = Q.T @ u   # shape: (q_dim,)
+            if len(x.shape) > 0:
+                Px = P @ x    # shape: (n_dim,)
+            else: 
+                Px = P * x
+            new_g_bar = (u - Px).reshape(-1)
+        else:
+            new_g_bar = u.reshape(-1)
+
+        
+        if "P" in state:
+            P, Q = state["P"], state["Q"]
+            if len(new_g_bar.shape) == 1:
+                new_g_bar = new_g_bar.view(1, -1)
+            # print(Q.shape)
+            # print(new_g_bar.shape)
+            x_sym = new_g_bar @ Q
+
+            if len(x_sym.shape) > 0:
+                x_sym_P = x_sym @ P.T    # shape: (n_dim,)
+            else: 
+                x_sym_P = x_sym * P
+            new_sym_g_bar = d * (new_g_bar - x_sym_P).reshape(-1)
+        else:
+            new_sym_g_bar = d * new_g_bar
+        return new_sym_g_bar
 
 
     def calculate_coeffs(
@@ -205,6 +239,10 @@ class AdaGram(Optimizer, ABC):
     
                     # Update gradient vector
                     g_bar = self.update_grad_vector(state, grad_vector)
+
+                    ##### HERE SYM VERSION!!!
+                        
+                    g_bar_sym = self.update_grad_vector_sym(state, grad_vector)
     
                     g_bar_norm_sq, alpha, beta = self.calculate_coeffs(g_bar)
     
@@ -248,8 +286,6 @@ class AdaGram(Optimizer, ABC):
                         target = state["G"]
                         error_norm = torch.norm(torch.abs(target - result)) / torch.norm(target)
 
-
-
                     state["step_count"] += 1
     
                     # Log statistics
@@ -268,7 +304,8 @@ class AdaGram(Optimizer, ABC):
                         )
     
     
-                    precond_grad = g_bar / torch.sqrt(1 + g_bar_norm_sq)
+                    # precond_grad = g_bar / torch.sqrt(1 + g_bar_norm_sq)
+                    precond_grad = g_bar_sym / (1 + g_bar_norm_sq)
                     param_vector.add_(precond_grad, alpha=-group["lr"])
                     p.grad.data = precond_grad
                     p.data = param_vector.reshape(original_shape)

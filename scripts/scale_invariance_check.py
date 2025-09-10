@@ -7,9 +7,9 @@ import torch
 import libcontext
 from typing import Optional
 
-from src.AdagramSVD import AdaGramFR
-from src.AdagramVanilla import AdaGramVanilla
-from src.AdagramPS import AdaGramPS
+from src.adagram_optimizers.AdagramSVD import AdaGramFR
+from src.adagram_optimizers.AdagramVanilla import AdaGramVanilla
+from src.adagram_optimizers.AdagramPS import AdaGramPS
 
 
 """

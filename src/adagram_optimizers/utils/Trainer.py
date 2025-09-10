@@ -11,8 +11,8 @@ from sklearn.model_selection import train_test_split
 from typing import Optional
 
 # Assume other necessary imports (Config, custom models, optimizers, datasets) are available
-# from src.utils.Config import Config
-# from src.utils.models import ...
+# from src.adagram_optimizers.utils.Config import Config
+# from src.adagram_optimizers.utils.models import ...
 
 class Trainer:
     """

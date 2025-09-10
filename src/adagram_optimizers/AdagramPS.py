@@ -1,7 +1,7 @@
 import torch
 
 from typing import Optional, Dict, Any
-from src.AdagramBase import AdaGram, AdaGramLogger
+from src.adagram_optimizers.AdagramBase import AdaGram, AdaGramLogger
 
 from line_profiler import profile
 
@@ -169,9 +169,5 @@ class AdaGramPS(AdaGram):
                     ) / torch.norm(state["rec_target"])
             
             state["Q"] = state["V"]
-
-
-
-
 
         return state["P"], state["Q"], reconstruct_error

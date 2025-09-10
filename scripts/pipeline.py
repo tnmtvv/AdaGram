@@ -3,7 +3,7 @@ import pandas
 import argparse
 
 from ExperimentRunner import ExperimentRunner
-from src.utils.Config import Config
+from src.adagram_optimizers.utils.Config import Config
 
 def main(config_path, mode, output_filename):
     """Main function to run the experiment."""

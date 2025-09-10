@@ -9,11 +9,11 @@ from torch.utils.data import TensorDataset, DataLoader
 import libcontext
 
 
-from src.AdagramSVD import AdaGramFR
-from src.AdagramVanilla import AdaGramVanilla
-from src.AdagramPS import AdaGramPS
-from src.Shampoo import Shampoo
-from src.FullAdagrad import FullAdaGrad
+from src.adagram_optimizers.AdagramSVD import AdaGramFR
+from src.adagram_optimizers.AdagramVanilla import AdaGramVanilla
+from src.adagram_optimizers.AdagramPS import AdaGramPS
+from src.adagram_optimizers.Shampoo import Shampoo
+from src.adagram_optimizers.FullAdagrad import FullAdaGrad
 
 
 class OptimizerStateTester:

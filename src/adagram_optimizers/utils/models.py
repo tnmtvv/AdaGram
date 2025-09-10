@@ -41,3 +41,20 @@ class SimpleClassifier(nn.Module):
 
     def forward(self, x):
         return self.linear(x)
+    
+# class SimpleClassifierMultilayer(nn.Module):
+#     def __init__(self, input_dim, output_dim=2, seed=100):
+#         super().__init__()
+#         if seed is not None:
+#             random.seed(seed)
+#             np.random.seed(seed)
+#             torch.manual_seed(seed)
+#             torch.cuda.manual_seed(seed)
+#             torch.cuda.manual_seed_all(seed)
+#             torch.backends.cudnn.deterministic = True
+#             torch.backends.cudnn.benchmark = False
+#         self.linear = nn.Linear(input_dim, output_dim)
+#         self.linear = nn.Linear(output_dim, output_dim)
+
+#     def forward(self, x):
+#         return self.linear(x)
