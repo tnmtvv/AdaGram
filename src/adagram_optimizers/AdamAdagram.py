@@ -28,6 +28,7 @@ class AdamAdagram(AdaGramPS, AdaGram):
         eps: float = 1e-8,  
         weight_decay: float = 0,
         max_rank: Optional[int] = None,
+        alpha = None,
         log_file: str = "results/adagram_logs.csv",
         task: str = "LinReg",
         save_dir: str = "matrix_G",
@@ -85,6 +86,7 @@ class AdamAdagram(AdaGramPS, AdaGram):
         self.beta1 = beta1
         self.beta2 = beta2
         self.max_rank = max_rank
+        self.alpha = alpha
         self.task = task
         self.enable_logging = enable_logging
         self.save_matrix = save_matrix

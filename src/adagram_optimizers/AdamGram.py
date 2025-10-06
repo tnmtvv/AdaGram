@@ -26,6 +26,7 @@ class AdamGram(AdaGramPS, AdaGram):
         lr: float = 0.001,  
         beta1: float = 0.9, 
         beta2: float = 0.999,
+        alpha = None,
         eps: float = 1e-8,  
         weight_decay: float = 0,
         max_rank: Optional[int] = None,
@@ -86,6 +87,7 @@ class AdamGram(AdaGramPS, AdaGram):
         self.beta1 = beta1
         self.beta2 = beta2
         self.max_rank = max_rank
+        self.alpha = alpha
         self.task = task
         self.enable_logging = enable_logging
         self.save_matrix = save_matrix
@@ -159,7 +161,7 @@ class AdamGram(AdaGramPS, AdaGram):
 
 
                     moment_grad = self.beta1 * state["m_t"] + (1 - self.beta1) * grad
-                                       
+
                     g_bar = self.update_grad_vector(state, moment_grad)
                     g_bar_norm_sq, alpha, beta = self.calculate_coeffs(g_bar)
 
