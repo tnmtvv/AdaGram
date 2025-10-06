@@ -14,6 +14,8 @@ from src.adagram_optimizers.AdagramVanilla import AdaGramVanilla
 from src.adagram_optimizers.AdagramPS import AdaGramPS
 from src.adagram_optimizers.Shampoo import Shampoo
 from src.adagram_optimizers.FullAdagrad import FullAdaGrad
+from src.adagram_optimizers.AdamAdagram import AdamAdagram
+from src.adagram_optimizers.AdagramAdam import AdagramAdam
 
 
 class OptimizerStateTester:
@@ -95,6 +97,8 @@ def optimizer_configs():
         "AdaGram": {"lr": 0.1, "eps": 1e-4, "enable_logging": True},
         "AdaGramFR": {"lr": 0.1, "eps": 1e-2, "max_rank": None, "enable_logging": True},
         "AdaGramPS": {"lr": 0.1, "eps": 1e-2, "max_rank": None, "enable_logging": True},
+        "AdamAdagram": {"lr": 0.1, "eps": 1e-2, "max_rank": None, "enable_logging": True},
+        "AdagramAdam": {"lr": 0.1, "eps": 1e-2, "max_rank": None, "enable_logging": True},
     }
 
 
@@ -110,6 +114,10 @@ class TestOptimizerStateCapture:
             return AdaGramFR(model_params, **config), 1e-2
         elif optimizer_name == "AdaGramPS":
             return AdaGramPS(model_params, **config), 1e-2
+        elif optimizer_name == "AdamAdagram":
+            return AdamAdagram(model_params, **config), 1e-2
+        elif optimizer_name == "AdagramAdam":
+            return AdagramAdam(model_params, **config), 1e-2
         else:
             raise ValueError(f"Unknown optimizer: {optimizer_name}")
 
@@ -120,6 +128,8 @@ class TestOptimizerStateCapture:
             "AdaGram",
             "AdaGramPS",
             "AdaGramFR",
+            "AdagramAdam",
+            "AdamAdagram"
         ],
     )
     def test_state_initialization(
@@ -134,6 +144,10 @@ class TestOptimizerStateCapture:
             optimizer = AdaGramFR(simple_model.parameters(), **config)
         elif optimizer_name == "AdaGramPS":
             optimizer = AdaGramPS(simple_model.parameters(), **config)
+        elif optimizer_name == "AdagramAdam":
+            optimizer = AdagramAdam(simple_model.parameters(), **config)
+        elif optimizer_name == "AdamAdagram":
+            optimizer = AdamAdagram(simple_model.parameters(), **config)
 
         tester = OptimizerStateTester(optimizer, optimizer_name)
 

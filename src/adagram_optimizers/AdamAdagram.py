@@ -6,11 +6,11 @@ import os
 from typing import Optional, Dict, Any, Tuple
 from abc import ABC
 
-from src.utils.Logger import AdaGramLogger
+from utils.Logger import AdaGramLogger
 from line_profiler import profile
 
-from src.AdagramBase import AdaGram
-from src.AdagramPS import AdaGramPS
+from AdagramBase import AdaGram
+from AdagramPS import AdaGramPS
 
 class AdamAdagram(AdaGramPS, AdaGram):
     """
