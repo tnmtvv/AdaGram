@@ -160,7 +160,7 @@ class AdamGram(AdaGramPS, AdaGram):
                     # AdaGram preconditioning
 
 
-                    moment_grad = self.beta1 * state["m_t"] + (1 - self.beta1) * grad
+                    moment_grad = self.beta1 * state["m_t"] + (1 - self.beta1) * grad_vector
 
                     g_bar = self.update_grad_vector(state, moment_grad)
                     g_bar_norm_sq, alpha, beta = self.calculate_coeffs(g_bar)
