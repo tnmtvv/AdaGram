@@ -46,7 +46,7 @@ class AdaGramPS(AdaGram):
     def reduce_rank_psi(self, delta_A, U_0, S_0, V_0):
         if self.alpha:
             S_0 = self.alpha * S_0
-            delta_A = (1 - self.alpha) * delta_A
+            delta_A = (2 - self.alpha) * delta_A
             
             print("alpha", self.alpha)
         K_cur = U_0 @ S_0 + delta_A @ V_0
@@ -68,7 +68,7 @@ class AdaGramPS(AdaGram):
         if self.alpha:
             alpha = self.alpha 
         else: 
-            alpha = 0.5 
+            alpha = 1 
 
         # Precompute scalar products
         gu = torch.dot(g, s * u)       # P = u*s
@@ -81,7 +81,7 @@ class AdaGramPS(AdaGram):
 
         # Compute K and norm efficiently
         s = alpha * s
-        delta_av = (1 - alpha) * delta_av
+        delta_av = (2 - alpha) * delta_av
 
         K_cur = u * s + delta_av       # Vector
         K_norm = torch.sqrt(torch.dot(K_cur, K_cur))     # Scalar

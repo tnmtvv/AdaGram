@@ -243,7 +243,7 @@ class AdaGram(Optimizer, ABC):
 
                     ##### HERE SYM VERSION!!!
                         
-                    g_bar_sym = self.update_grad_vector_sym(state, grad_vector)
+                    # g_bar_sym = self.update_grad_vector_sym(state, grad_vector)
     
                     g_bar_norm_sq, alpha, beta = self.calculate_coeffs(g_bar)
     
@@ -306,7 +306,7 @@ class AdaGram(Optimizer, ABC):
     
     
                     # precond_grad = g_bar / torch.sqrt(1 + g_bar_norm_sq)
-                    precond_grad = g_bar_sym / (1 + g_bar_norm_sq)
+                    precond_grad = g_bar / torch.sqrt(1 + g_bar_norm_sq)
                     param_vector.add_(precond_grad, alpha=-group["lr"])
                     p.grad.data = precond_grad
                     p.data = param_vector.reshape(original_shape)

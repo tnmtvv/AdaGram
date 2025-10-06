@@ -16,6 +16,7 @@ from src.adagram_optimizers.Shampoo import Shampoo
 from src.adagram_optimizers.FullAdagrad import FullAdaGrad
 from src.adagram_optimizers.AdamAdagram import AdamAdagram
 from src.adagram_optimizers.AdagramAdam import AdagramAdam
+from src.adagram_optimizers.AdamGram import AdamGram
 
 
 class OptimizerStateTester:
@@ -99,6 +100,7 @@ def optimizer_configs():
         "AdaGramPS": {"lr": 0.1, "eps": 1e-2, "max_rank": None, "enable_logging": True},
         "AdamAdagram": {"lr": 0.1, "eps": 1e-2, "max_rank": None, "enable_logging": True},
         "AdagramAdam": {"lr": 0.1, "eps": 1e-2, "max_rank": None, "enable_logging": True},
+        "AdamGram": {"lr": 0.1, "eps": 1e-2, "max_rank": None, "enable_logging": True},
     }
 
 
@@ -118,6 +120,8 @@ class TestOptimizerStateCapture:
             return AdamAdagram(model_params, **config), 1e-2
         elif optimizer_name == "AdagramAdam":
             return AdagramAdam(model_params, **config), 1e-2
+        elif optimizer_name == "AdamGram":
+            return AdamGram(model_params, **config), 1e-2
         else:
             raise ValueError(f"Unknown optimizer: {optimizer_name}")
 
@@ -129,7 +133,8 @@ class TestOptimizerStateCapture:
             "AdaGramPS",
             "AdaGramFR",
             "AdagramAdam",
-            "AdamAdagram"
+            "AdamAdagram",
+            "AdamGram"
         ],
     )
     def test_state_initialization(
@@ -148,6 +153,8 @@ class TestOptimizerStateCapture:
             optimizer = AdagramAdam(simple_model.parameters(), **config)
         elif optimizer_name == "AdamAdagram":
             optimizer = AdamAdagram(simple_model.parameters(), **config)
+        elif optimizer_name == "AdamGram":
+            optimizer = AdamGram(simple_model.parameters(), **config)
 
         tester = OptimizerStateTester(optimizer, optimizer_name)
 

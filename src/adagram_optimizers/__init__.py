@@ -13,6 +13,10 @@ from .FullAdagrad import *
 from .Kate import *
 from .libcontext import *
 from .Shampoo import *
+from .AdagramAdam import *
+from .AdamAdagram import *
+from .AdamGram import *
+from .Shampoo import *
 
 
 
