@@ -220,9 +220,9 @@ class AdamGram(AdaGramPS, AdaGram):
                     precond_grad = g_bar / torch.sqrt(1 + g_bar_norm_sq) ## v
                     
                     m_hat = state["m_t"] / (1 - self.beta1**state["step_count"])
-                    v_hat = precond_grad / (1 - self.beta2 ** state["step_count"])
+                    v_hat = precond_grad / (1 - self.beta2**state["step_count"])
 
-                    update = m_hat / (torch.sqrt(v_hat) + 1e-6)
+                    update = m_hat / (torch.sqrt(v_hat) + 1e-3)
 
                     # param_vector.add_(precond_grad, alpha=-group["lr"])
                     param_vector.add_(update, alpha=-group["lr"])
