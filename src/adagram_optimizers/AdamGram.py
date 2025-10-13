@@ -224,7 +224,7 @@ class AdamGram(AdaGramPS, AdaGram):
 
                     update = m_hat / (torch.sqrt(v_hat) + 1e-3)
 
-                    param_vector.add_(v_hat, alpha=-group["lr"])
+                    param_vector.add_(precond_grad, alpha=-group["lr"])
                     # param_vector.add_(update, alpha=-group["lr"])
                     # Update gradient for analysis (optional)
                     p.grad.data = precond_grad.reshape(original_shape)
