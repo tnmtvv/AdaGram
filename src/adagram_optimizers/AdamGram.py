@@ -214,10 +214,18 @@ class AdamGram(AdaGramPS, AdaGram):
                             epoch=epoch,
                         )
 
-                    precond_grad = g_bar / torch.sqrt(1 + g_bar_norm_sq)
                     state['m_t'] = moment_grad 
 
-                    param_vector.add_(precond_grad, alpha=-group["lr"])
+
+                    precond_grad = g_bar / torch.sqrt(1 + g_bar_norm_sq) ## v
+                    
+                    m_hat = state["m_t"] / (1 - self.beta1**state["step_count"])
+                    v_hat = precond_grad / (1 - self.beta2 ** state["step_count"])
+
+                    update = m_hat / (torch.sqrt(v_hat) + 1e-6)
+
+                    # param_vector.add_(precond_grad, alpha=-group["lr"])
+                    param_vector.add_(update, alpha=-group["lr"])
                     # Update gradient for analysis (optional)
                     p.grad.data = precond_grad.reshape(original_shape)
                     p.data = param_vector.reshape(original_shape)
