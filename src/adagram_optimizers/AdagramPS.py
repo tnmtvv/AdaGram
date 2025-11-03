@@ -80,8 +80,8 @@ class AdaGramPS(AdaGram):
         delta_av = const * g           # Vector
 
         # Compute K and norm efficiently
-        s = alpha * s
-        delta_av = (2 - alpha) * delta_av
+        # s = alpha * s
+        # delta_av = (2 - alpha) * delta_av
 
         K_cur = u * s + delta_av       # Vector
         K_norm = torch.sqrt(torch.dot(K_cur, K_cur))     # Scalar
