@@ -42,20 +42,70 @@ class AdaGramPS(AdaGram):
         self.task_name = task
         self.alpha = alpha
 
-    @profile
-    def reduce_rank_psi(self, delta_A, U_0, S_0, V_0):
-        if self.alpha:
-            S_0 = self.alpha * S_0
-            delta_A = (2 - self.alpha) * delta_A
+    # @profile
+    # def reduce_rank_psi(self, delta_A, U_0, S_0, V_0):
+    #     if self.alpha:
+    #         S_0 = self.alpha * S_0
+    #         delta_A = (2 - self.alpha) * delta_A
             
-            print("alpha", self.alpha)
-        K_cur = U_0 @ S_0 + delta_A @ V_0
-        U_cur, S_hat = torch.linalg.qr(K_cur)
-        S_tild = S_hat - U_cur.T @ (delta_A @ V_0)
-        L_cur = V_0 @ S_tild.T + delta_A.T @ U_cur
-        V_cur, S_cur_T = torch.linalg.qr(L_cur)
-        return U_cur, S_cur_T.T, V_cur
+    #         print("alpha", self.alpha)
+    #     K_cur = U_0 @ S_0 + delta_A @ V_0
+    #     U_cur, S_hat = torch.linalg.qr(K_cur)
+    #     S_tild = S_hat - U_cur.T @ (delta_A @ V_0)
+    #     L_cur = V_0 @ S_tild.T + delta_A.T @ U_cur
+    #     V_cur, S_cur_T = torch.linalg.qr(L_cur)
+    #     return U_cur, S_cur_T.T, V_cur
+
+
+    # @profile
+    # def reduce_rank_psi(self, b, g, U_0, S_0, V_0):
+    #     vv = V_0.T @ V_0  # r x r
+    #     g_us = g.T @ (U_0 @ S_0) # 1 x r
+    #     gv = g.T @ V_0 # 1 x r
+
+    #     l_r = b * (gv - g_us @ vv) # 1 x r
+    #     delta_av = g @ l_r
+
+
+    #     K_cur = U_0 @ S_0  + delta_av # n x r
+
+    #     U_cur, S_hat = torch.linalg.qr(K_cur)
+    #     S_tild = S_hat - U_cur.T @ (g @ l_r)
+
+    #     delta_au = b * (g - V_0 @ S_0.T @ (U_0.T @ g)) @ (g.T @ U_cur)
+    #     L_cur = V_0 @ S_tild.T + delta_au
+
+    #     V_cur, S_cur_T = torch.linalg.qr(L_cur)
+    #     return U_cur, S_cur_T.T, V_cur
     
+
+    @profile
+    def reduce_rank_psi(self, b, g, U_0, S_0, V_0):
+        # Shapes assumed:
+        # U_0: (n, r), S_0: (r, r), V_0: (n, r), g: (n,), b: scalar
+
+        vv   = V_0.T @ V_0                 # (r, r)
+        g_us = g @ (U_0 @ S_0)             # (r,)
+        gv   = g @ V_0                     # (r,)
+
+        l_r = b * (gv - g_us @ vv)         # (r,)
+        delta_av = g[:, None] @ l_r[None, :]   # (n, r) outer product
+        # K step
+        K_cur = (U_0 @ S_0) + delta_av     # (n, r)
+        U_cur, S_hat = torch.linalg.qr(K_cur)
+
+        S_tild = S_hat - U_cur.T @ delta_av    # (r, r)
+
+        t = g @ U_cur                     
+        w = g - V_0 @ (S_0.T @ (U_0.T @ g))# (n,)
+        delta_au = b * w[:, None] @ t[None, :] # (n, r) outer product
+
+        # L step
+        L_cur = (V_0 @ S_tild.T) + delta_au     # (n, r)
+        V_cur, S_cur_T = torch.linalg.qr(L_cur)
+
+        return U_cur, S_cur_T.T, V_cur
+
 
     @profile
     def one_rank_psi(self, b, g, u, s, v):
@@ -71,12 +121,12 @@ class AdaGramPS(AdaGram):
             alpha = 1 
 
         # Precompute scalar products
-        gu = torch.dot(g, s * u)       # P = u*s
+        g_us = torch.dot(g, s * u)       # P = u*s
         gv = torch.dot(g, v)           # g^T v
         vv = torch.dot(v, v)           # v^T v
 
         # Only one vector multiplication per use
-        const = b * (gv - gu * vv)     # Scalar
+        const = b * (gv - g_us * vv)     # Scalar
         delta_av = const * g           # Vector
 
         # Compute K and norm efficiently
@@ -94,7 +144,7 @@ class AdaGramPS(AdaGram):
         gk = torch.dot(g, U_cur)                      # Scalar
 
         # delta_au is fully vectorized, reuses gu, gk
-        delta_au = b * (g - v * gu) * gk              # Vector
+        delta_au = b * (g - v * g_us) * gk              # Vector
 
         # L_cur etc
         L_cur = v * S_tild + delta_au                 # Vector
