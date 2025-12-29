@@ -198,14 +198,14 @@ class AdaGramPS(AdaGram):
                 if self.enable_logging:
                     prev_matrix = state["P"] @ state["Q"].T
 
-                g_bar_col = g_bar.reshape(-1, 1)
-                g_p_proj = (g_bar @ state["P"]).reshape(-1) 
+                # g_bar_col = g_bar.reshape(-1, 1)
+                # g_p_proj = (g_bar @ state["P"]).reshape(-1) 
 
-                update = (beta * g_bar_col) @ (g_bar - g_p_proj @ state["Q"].T).reshape(1, -1)
+                # update = (beta * g_bar_col) @ (g_bar - g_p_proj @ state["Q"].T).reshape(1, -1)
 
 
                 state["U"], state["S"], state["V"] = self.reduce_rank_psi(
-                    update, state["U"], state["S"], state["V"]
+                    beta, g_bar, state["U"], state["S"], state["V"]
                 )  # here all the matrices are not transposed
                 state["P"] = state["U"] @ state["S"] # S matrix is not diagonal!
 
