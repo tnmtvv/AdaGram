@@ -189,6 +189,7 @@ class AdaGramPS(AdaGram):
                     prev_matrix = state["P"] @ state["Q"].T
 
                 update = g_bar
+                print("reducing rank with old method")
                 state["U"], state["S"], state["V"] = self.one_rank_psi(
                 beta, update, state["U"], state["S"], state["V"]
             ) 
@@ -203,7 +204,7 @@ class AdaGramPS(AdaGram):
 
                 # update = (beta * g_bar_col) @ (g_bar - g_p_proj @ state["Q"].T).reshape(1, -1)
 
-
+                print("reducing rank with new method")
                 state["U"], state["S"], state["V"] = self.reduce_rank_psi(
                     beta, g_bar, state["U"], state["S"], state["V"]
                 )  # here all the matrices are not transposed

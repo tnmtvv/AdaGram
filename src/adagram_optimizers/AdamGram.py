@@ -166,6 +166,7 @@ class AdamGram(AdaGramPS, AdaGram):
                     g_bar_norm_sq, alpha, beta = self.calculate_coeffs(g_bar)
 
                     # Update P and Q matrices (AdaGram logic)
+                    print('before update')
                     state["P"], state["Q"], reconstruct_error = self.update_PQ(
                         state,
                         beta,
