@@ -118,4 +118,4 @@ class AdaGramEQ(AdaGramPS):
         L_cur = (V_0 @ S_tild.T) + delta_au     # (n, r)
         V_cur, S_cur_T = torch.linalg.qr(L_cur)
 
-        return U_cur, torch.eye(S_cur_T.shape), V_cur
+        return U_cur, torch.eye(S_cur_T.shape[0], device=U_cur.device, dtype=U_cur.dtype), V_cur

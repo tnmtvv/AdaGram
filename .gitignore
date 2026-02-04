@@ -171,3 +171,5 @@ cython_debug/
 *.lprof
 *.prof
 *.npy
+*.safetensors
+/grads_dump_batches
