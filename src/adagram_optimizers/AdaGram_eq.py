@@ -73,27 +73,7 @@ class AdaGramEQ(AdaGramPS):
         # Return as column vectors if needed
         return U_cur.unsqueeze(1), 1, V_cur.unsqueeze(1)
 
-    # def reduce_rank_psi(self, delta_A, U_0, S_0, V_0):
-    #     if self.alpha:
-    #         S_0 = self.alpha * S_0
-    #         delta_A = (2 - self.alpha) * delta_A
-            
-    #         print("alpha", self.alpha)
-    #     K_cur = U_0 @ S_0 + delta_A @ V_0
-    #     U_cur, S_hat = torch.linalg.qr(K_cur)
-    #     S_tild = S_hat - U_cur.T @ (delta_A @ V_0)
-    #     L_cur = V_0 @ S_tild.T + delta_A.T @ U_cur
-    #     V_cur, S_cur_T = torch.linalg.qr(L_cur)
 
-    #     U, _, Vh = torch.linalg.svd(S_cur_T.T, full_matrices = False)
-        
-    #     new_U = U_cur @ U
-    #     new_V = Vh @ V_cur
-    #     new_S = torch.eye(S_cur_T.shape)
-
-    #     return new_U, new_S, new_V
-
-    @profile
     def reduce_rank_psi(self, b, g, U_0, S_0, V_0):
         # Shapes assumed:
         # U_0: (n, r), S_0: (r, r), V_0: (n, r), g: (n,), b: scalar
