@@ -71,24 +71,51 @@ class AdaGramEQ(AdaGramPS):
         V_cur = L_cur / L_norm                        # Unit vector
 
         # Return as column vectors if needed
-        return U_cur.unsqueeze(1), L_norm, V_cur.unsqueeze(1)
+        return U_cur.unsqueeze(1), 1, V_cur.unsqueeze(1)
 
-    def reduce_rank_psi(self, delta_A, U_0, S_0, V_0):
-        if self.alpha:
-            S_0 = self.alpha * S_0
-            delta_A = (2 - self.alpha) * delta_A
+    # def reduce_rank_psi(self, delta_A, U_0, S_0, V_0):
+    #     if self.alpha:
+    #         S_0 = self.alpha * S_0
+    #         delta_A = (2 - self.alpha) * delta_A
             
-            print("alpha", self.alpha)
-        K_cur = U_0 @ S_0 + delta_A @ V_0
+    #         print("alpha", self.alpha)
+    #     K_cur = U_0 @ S_0 + delta_A @ V_0
+    #     U_cur, S_hat = torch.linalg.qr(K_cur)
+    #     S_tild = S_hat - U_cur.T @ (delta_A @ V_0)
+    #     L_cur = V_0 @ S_tild.T + delta_A.T @ U_cur
+    #     V_cur, S_cur_T = torch.linalg.qr(L_cur)
+
+    #     U, _, Vh = torch.linalg.svd(S_cur_T.T, full_matrices = False)
+        
+    #     new_U = U_cur @ U
+    #     new_V = Vh @ V_cur
+    #     new_S = torch.eye(S_cur_T.shape)
+
+    #     return new_U, new_S, new_V
+
+    @profile
+    def reduce_rank_psi(self, b, g, U_0, S_0, V_0):
+        # Shapes assumed:
+        # U_0: (n, r), S_0: (r, r), V_0: (n, r), g: (n,), b: scalar
+
+        vv   = V_0.T @ V_0                 # (r, r)
+        g_us = g @ (U_0 @ S_0)             # (r,)
+        gv   = g @ V_0                     # (r,)
+
+        l_r = b * (gv - g_us @ vv)         # (r,)
+        delta_av = g[:, None] @ l_r[None, :]   # (n, r) outer product
+        # K step
+        K_cur = (U_0 @ S_0) + delta_av     # (n, r)
         U_cur, S_hat = torch.linalg.qr(K_cur)
-        S_tild = S_hat - U_cur.T @ (delta_A @ V_0)
-        L_cur = V_0 @ S_tild.T + delta_A.T @ U_cur
+
+        S_tild = S_hat - U_cur.T @ delta_av    # (r, r)
+
+        t = g @ U_cur                     
+        w = g - V_0 @ (S_0.T @ (U_0.T @ g))# (n,)
+        delta_au = b * w[:, None] @ t[None, :] # (n, r) outer product
+
+        # L step
+        L_cur = (V_0 @ S_tild.T) + delta_au     # (n, r)
         V_cur, S_cur_T = torch.linalg.qr(L_cur)
 
-        U, _, Vh = torch.linalg.svd(S_cur_T.T, full_matrices = False)
-        
-        new_U = U_cur @ U
-        new_V = Vh @ V_cur
-        new_S = torch.eye(S_cur_T.shape)
-
-        return new_U, new_S, new_V
+        return U_cur, torch.eye(S_cur_T.shape), V_cur

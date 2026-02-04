@@ -170,3 +170,4 @@ cython_debug/
 /scripts/matrix_G_pngs
 *.lprof
 *.prof
+*.npy
