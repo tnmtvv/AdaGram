@@ -17,6 +17,7 @@ from .AdagramAdam import *
 from .AdamAdagram import *
 from .AdamGram import *
 from .Shampoo import *
+from .SymAdaGram import *
 
 
 
@@ -31,6 +32,7 @@ __all__ = [
     'FullAdagrad',
     'Kate',
     'Shampoo',
-    'utils'
+    'utils',
+    'SymAdaGram'
     # Add other class names as needed
 ]
