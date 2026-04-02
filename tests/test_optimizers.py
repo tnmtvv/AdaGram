@@ -18,6 +18,7 @@ from src.adagram_optimizers.AdamAdagram import AdamAdagram
 from src.adagram_optimizers.AdagramAdam import AdagramAdam
 from src.adagram_optimizers.AdamGram import AdamGram
 from src.adagram_optimizers.AdaGram_eq import AdaGramEQ
+from src.adagram_optimizers.SymAdaGram import SymAdaGram
 
 
 class OptimizerStateTester:
@@ -103,6 +104,7 @@ def optimizer_configs():
         "AdagramAdam": {"lr": 0.1, "eps": 1e-2, "max_rank": None, "enable_logging": True},
         "AdamGram": {"lr": 0.1, "eps": 1e-2, "max_rank": None, "enable_logging": True},
         "AdaGramEQ": {"lr": 0.1, "eps": 1e-2, "max_rank": None, "enable_logging": True},
+        "SymAdaGram": {"lr": 0.1, "eps": 1e-2, "max_rank": None, "enable_logging": True},
     }
 
 
@@ -126,6 +128,8 @@ class TestOptimizerStateCapture:
             return AdamGram(model_params, **config), 1e-2
         elif optimizer_name == "AdaGramEQ":
             return AdamGram(model_params, **config), 1e-2
+        elif optimizer_name == "SymAdaGram":
+            return SymAdaGram(model_params, **config), 1e-2
         else:
             raise ValueError(f"Unknown optimizer: {optimizer_name}")
 
@@ -140,6 +144,7 @@ class TestOptimizerStateCapture:
             "AdamAdagram",
             "AdamGram",
             "AdaGramEQ",
+            "SymAdaGram"
 
         ],
     )
@@ -163,6 +168,8 @@ class TestOptimizerStateCapture:
             optimizer = AdamGram(simple_model.parameters(), **config)
         elif optimizer_name == "AdaGramEQ":
             optimizer = AdamGram(simple_model.parameters(), **config)
+        elif optimizer_name == "SymAdaGram":
+            optimizer = SymAdaGram(simple_model.parameters(), **config)
 
         tester = OptimizerStateTester(optimizer, optimizer_name)
 
@@ -184,7 +191,7 @@ class TestOptimizerStateCapture:
         tester.capture_state()
         assert len(tester.states_history) == 2
 
-    @pytest.mark.parametrize("optimizer_name", ["AdaGramFR", "AdaGramPS"])
+    @pytest.mark.parametrize("optimizer_name", ["AdaGramFR", "AdaGramPS", "SymAdaGram"])
     def test_state_properties_minibatch(
         self,
         simple_model,
@@ -239,7 +246,7 @@ class TestOptimizerStateCapture:
                 reconstructed_G = L_t @ L_t.T
                 assert torch.allclose(G_matrix, reconstructed_G, atol=atol, rtol=atol)
 
-    @pytest.mark.parametrize("optimizer_name", ["AdaGramFR", "AdaGramPS"])
+    @pytest.mark.parametrize("optimizer_name", ["AdaGramFR", "AdaGramPS", "SymAdaGram"])
     def test_reconstruction_minibatch(
         self,
         simple_model,

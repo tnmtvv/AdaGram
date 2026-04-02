@@ -85,7 +85,7 @@ class AdaGram(Optimizer, ABC):
         U_s, S, Vh_s = torch.linalg.svd(small_matrix, full_matrices=False)
 
         if self.max_rank is not None:
-            U_s = U_s[:, :self.max_rank]
+            U_s = U_s[:, :self.max_ra4nk]
             S = S[:self.max_rank]
             Vh_s = Vh_s[:self.max_rank, :]
 
