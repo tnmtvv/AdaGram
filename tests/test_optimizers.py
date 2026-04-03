@@ -14,11 +14,10 @@ from src.adagram_optimizers.AdagramVanilla import AdaGramVanilla
 from src.adagram_optimizers.AdagramPS import AdaGramPS
 from src.adagram_optimizers.Shampoo import Shampoo
 from src.adagram_optimizers.FullAdagrad import FullAdaGrad
-from src.adagram_optimizers.AdamAdagram import AdamAdagram
-from src.adagram_optimizers.AdagramAdam import AdagramAdam
 from src.adagram_optimizers.AdamGram import AdamGram
 from src.adagram_optimizers.AdaGram_eq import AdaGramEQ
 from src.adagram_optimizers.SymAdaGram import SymAdaGram
+from src.adagram_optimizers.AdamGram import SymAdamGram
 
 
 class OptimizerStateTester:
@@ -105,6 +104,7 @@ def optimizer_configs():
         "AdamGram": {"lr": 0.1, "eps": 1e-2, "max_rank": None, "enable_logging": True},
         "AdaGramEQ": {"lr": 0.1, "eps": 1e-2, "max_rank": None, "enable_logging": True},
         "SymAdaGram": {"lr": 0.1, "eps": 1e-2, "max_rank": None, "enable_logging": True},
+        "SymAdamGram": {"lr": 0.1, "eps": 1e-2, "max_rank": None, "enable_logging": True},
     }
 
 
@@ -120,15 +120,13 @@ class TestOptimizerStateCapture:
             return AdaGramFR(model_params, **config), 1e-2
         elif optimizer_name == "AdaGramPS":
             return AdaGramPS(model_params, **config), 1e-2
-        elif optimizer_name == "AdamAdagram":
-            return AdamAdagram(model_params, **config), 1e-2
-        elif optimizer_name == "AdagramAdam":
-            return AdagramAdam(model_params, **config), 1e-2
         elif optimizer_name == "AdamGram":
             return AdamGram(model_params, **config), 1e-2
         elif optimizer_name == "AdaGramEQ":
             return AdamGram(model_params, **config), 1e-2
         elif optimizer_name == "SymAdaGram":
+            return SymAdaGram(model_params, **config), 1e-2
+        elif optimizer_name == "SymAdamGram":
             return SymAdaGram(model_params, **config), 1e-2
         else:
             raise ValueError(f"Unknown optimizer: {optimizer_name}")
@@ -140,11 +138,10 @@ class TestOptimizerStateCapture:
             "AdaGram",
             "AdaGramPS",
             "AdaGramFR",
-            "AdagramAdam",
-            "AdamAdagram",
             "AdamGram",
             "AdaGramEQ",
-            "SymAdaGram"
+            "SymAdaGram",
+            "SymAdamGram"
 
         ],
     )
@@ -160,15 +157,13 @@ class TestOptimizerStateCapture:
             optimizer = AdaGramFR(simple_model.parameters(), **config)
         elif optimizer_name == "AdaGramPS":
             optimizer = AdaGramPS(simple_model.parameters(), **config)
-        elif optimizer_name == "AdagramAdam":
-            optimizer = AdagramAdam(simple_model.parameters(), **config)
-        elif optimizer_name == "AdamAdagram":
-            optimizer = AdamAdagram(simple_model.parameters(), **config)
         elif optimizer_name == "AdamGram":
             optimizer = AdamGram(simple_model.parameters(), **config)
         elif optimizer_name == "AdaGramEQ":
             optimizer = AdamGram(simple_model.parameters(), **config)
         elif optimizer_name == "SymAdaGram":
+            optimizer = SymAdaGram(simple_model.parameters(), **config)
+        elif optimizer_name == "SymAdamGram":
             optimizer = SymAdaGram(simple_model.parameters(), **config)
 
         tester = OptimizerStateTester(optimizer, optimizer_name)
@@ -191,7 +186,7 @@ class TestOptimizerStateCapture:
         tester.capture_state()
         assert len(tester.states_history) == 2
 
-    @pytest.mark.parametrize("optimizer_name", ["AdaGramFR", "AdaGramPS", "SymAdaGram"])
+    @pytest.mark.parametrize("optimizer_name", ["AdaGramFR", "AdaGramPS", "SymAdaGram", "SymAdamGram"])
     def test_state_properties_minibatch(
         self,
         simple_model,
@@ -246,7 +241,7 @@ class TestOptimizerStateCapture:
                 reconstructed_G = L_t @ L_t.T
                 assert torch.allclose(G_matrix, reconstructed_G, atol=atol, rtol=atol)
 
-    @pytest.mark.parametrize("optimizer_name", ["AdaGramFR", "AdaGramPS", "SymAdaGram"])
+    @pytest.mark.parametrize("optimizer_name", ["AdaGramFR", "AdaGramPS", "SymAdaGram", "SymAdamGram"])
     def test_reconstruction_minibatch(
         self,
         simple_model,

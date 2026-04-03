@@ -1,4 +1,3 @@
-from mmap import MAP_PRIVATE
 import torch
 from torch.optim import Optimizer
 import numpy as np
