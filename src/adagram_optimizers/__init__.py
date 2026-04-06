@@ -33,6 +33,8 @@ __all__ = [
     'utils',
     'SymAdaGram',
     'AdamGram',
-    'SymAdamGram'
+    'SymAdamGram',
+    'EQAdamGram',
+    'SVDAdamGram'
     # Add other class names as needed
 ]
