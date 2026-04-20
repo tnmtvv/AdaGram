@@ -84,12 +84,20 @@ class AdaGramPS(AdaGram):
         # Shapes assumed:
         # U_0: (n, r), S_0: (r, r), V_0: (n, r), g: (n,), b: scalar
 
+        if self.alpha:
+            alpha = self.alpha 
+        else: 
+            alpha = 1 
+
         vv   = V_0.T @ V_0                 # (r, r)
         g_us = g @ (U_0 @ S_0)             # (r,)
         gv   = g @ V_0                     # (r,)
 
         l_r = b * (gv - g_us @ vv)         # (r,)
         delta_av = g[:, None] @ l_r[None, :]   # (n, r) outer product
+
+        S_0 = alpha * S_0
+        delta_av = (2 - alpha) * delta_av
         # K step
         K_cur = (U_0 @ S_0) + delta_av     # (n, r)
         U_cur, S_hat = torch.linalg.qr(K_cur)
@@ -97,7 +105,7 @@ class AdaGramPS(AdaGram):
         S_tild = S_hat - U_cur.T @ delta_av    # (r, r)
 
         t = g @ U_cur                     
-        w = g - V_0 @ (S_0.T @ (U_0.T @ g))# (n,)
+        w = g - V_0 @ (S_0.T @ (U_0.T @ g)) # (n,)
         delta_au = b * w[:, None] @ t[None, :] # (n, r) outer product
 
         # L step
@@ -130,8 +138,8 @@ class AdaGramPS(AdaGram):
         delta_av = const * g           # Vector
 
         # Compute K and norm efficiently
-        # s = alpha * s
-        # delta_av = (2 - alpha) * delta_av
+        s = alpha * s
+        delta_av = (2 - alpha) * delta_av
 
         K_cur = u * s + delta_av       # Vector
         K_norm = torch.sqrt(torch.dot(K_cur, K_cur))     # Scalar
