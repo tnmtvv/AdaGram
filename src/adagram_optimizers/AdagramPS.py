@@ -81,44 +81,93 @@ class AdaGramPS(AdaGram):
     #     return U_cur, S_cur_T.T, V_cur
     
 
+    # @profile
+    # def reduce_rank_psi(self, b, g, U_0, S_0, V_0):
+    #     # Shapes assumed:
+    #     # U_0: (n, r), S_0: (r, r), V_0: (n, r), g: (n,), b: scalar
+
+    #     if self.alpha:
+    #         alpha = self.alpha 
+    #     else: 
+    #         alpha = 1 
+
+    #     vv   = V_0.T @ V_0                 # (r, r)
+    #     g_us = (g @ U_0) @ S_0          # (r,)
+    #     gv   = g @ V_0                     # (r,)
+
+    #     l_r = b * (gv - g_us @ vv)         # (r,)
+    #     delta_av = g[:, None] @ l_r[None, :]   # (n, r) outer product
+
+    #     S_0 = alpha * S_0
+    #     delta_av = (2 - alpha) * delta_av
+    #     # K step
+    #     K_cur = (U_0 @ S_0) + delta_av     # (n, r)
+    #     U_cur, S_hat = torch.linalg.qr(K_cur)
+
+    #     S_tild = S_hat - U_cur.T @ delta_av    # (r, r)
+
+    #     t = g @ U_cur                     
+    #     w = g - V_0 @ (S_0.T @ (U_0.T @ g)) # (n,)
+    #     # print(f"w, {w.shape}")
+    #     # print(f"t, {t.shape}")
+    #     delta_au = b * w[:, None] @ t[None, :] # (n, r) outer product
+    #     # print(f"delta au, {delta_au.shape}")
+
+    #     # L step
+    #     L_cur = (V_0 @ S_tild.T) + delta_au     # (n, r)
+    #     # print("S_tild.T", S_tild.T.shape)
+    #     # print("V_0", V_0.T.shape)
+        
+    #     V_cur, S_cur_T = torch.linalg.qr(L_cur)
+
+    #     return U_cur, S_cur_T.T, V_cur
+
+
     @profile
     def reduce_rank_psi(self, b, g, U_0, S_0, V_0):
-        # Shapes assumed:
-        # U_0: (n, r), S_0: (r, r), V_0: (n, r), g: (n,), b: scalar
+        alpha = self.alpha if self.alpha else 1
 
-        if self.alpha:
-            alpha = self.alpha 
-        else: 
-            alpha = 1 
+        vv = V_0.T @ V_0                          # (r, r)
+        gU = g @ U_0                              # (r,)
+        g_us = gU @ S_0                           # (r,)
+        gv = g @ V_0                              # (r,)
 
-        vv   = V_0.T @ V_0                 # (r, r)
-        g_us = (g @ U_0) @ S_0          # (r,)
-        gv   = g @ V_0                     # (r,)
+        l_r = gv - g_us @ vv                      # (r,)
+        l_r.mul_(b)                               # in-place
 
-        l_r = b * (gv - g_us @ vv)         # (r,)
-        delta_av = g[:, None] @ l_r[None, :]   # (n, r) outer product
+        delta_av = g[:, None] @ l_r[None, :]      # (n, r)
 
         S_0 = alpha * S_0
-        delta_av = (2 - alpha) * delta_av
-        # K step
-        K_cur = (U_0 @ S_0) + delta_av     # (n, r)
-        U_cur, S_hat = torch.linalg.qr(K_cur)
+        delta_av.mul_(2 - alpha)                  # in-place
 
-        S_tild = S_hat - U_cur.T @ delta_av    # (r, r)
+        K_cur = U_0 @ S_0                         # (n, r)
+        K_cur.add_(delta_av)                      # in-place
+        del gU
 
-        t = g @ U_cur                     
-        w = g - V_0 @ (S_0.T @ (U_0.T @ g)) # (n,)
-        # print(f"w, {w.shape}")
-        # print(f"t, {t.shape}")
-        delta_au = b * w[:, None] @ t[None, :] # (n, r) outer product
-        # print(f"delta au, {delta_au.shape}")
+        U_cur, S_hat = torch.linalg.qr(K_cur, mode="reduced")
+        del K_cur
 
-        # L step
-        L_cur = (V_0 @ S_tild.T) + delta_au     # (n, r)
-        # print("S_tild.T", S_tild.T.shape)
-        # print("V_0", V_0.T.shape)
-        
-        V_cur, S_cur_T = torch.linalg.qr(L_cur)
+        S_tild = S_hat - U_cur.T @ delta_av       # (r, r)
+        del delta_av
+
+        t = g @ U_cur                             # (r,)
+
+        uTg = U_0.T @ g                           # (r,)
+        tmp = S_0.T @ uTg                         # (r,)
+        proj = V_0 @ tmp                          # (n,)
+        w = g - proj                              # (n,)
+        del uTg, tmp, proj
+
+        delta_au = w[:, None] @ t[None, :]        # (n, r)
+        delta_au.mul_(b)                          # in-place
+        del w, t
+
+        L_cur = V_0 @ S_tild.T                    # (n, r)
+        L_cur.add_(delta_au)                      # in-place
+        del delta_au, S_tild
+
+        V_cur, S_cur_T = torch.linalg.qr(L_cur, mode="reduced")
+        del L_cur
 
         return U_cur, S_cur_T.T, V_cur
 
