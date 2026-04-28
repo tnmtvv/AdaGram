@@ -110,6 +110,9 @@ class AdaGramPS(AdaGram):
 
         # L step
         L_cur = (V_0 @ S_tild.T) + delta_au     # (n, r)
+        print("S_tild.T", S_tild.T.shape)
+        print("V_0", V_0.T.shape)
+        
         V_cur, S_cur_T = torch.linalg.qr(L_cur)
 
         return U_cur, S_cur_T.T, V_cur
