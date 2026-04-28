@@ -41,6 +41,8 @@ class AdaGramPS(AdaGram):
         self.save_dir = save_dir
         self.task_name = task
         self.alpha = alpha
+        print()
+        print("optimizer initialized!")
 
     # @profile
     # def reduce_rank_psi(self, delta_A, U_0, S_0, V_0):
@@ -172,7 +174,7 @@ class AdaGramPS(AdaGram):
         beta: torch.Tensor,
         g_bar: torch.Tensor,
     ):
-
+        print("update PQ here")
         beta_g = (beta * g_bar).reshape(-1, 1)
         g_bar_col = g_bar.reshape(-1, 1)
 
@@ -193,7 +195,10 @@ class AdaGramPS(AdaGram):
             if "U" not in state:
                 self._faster_svd(state)
                 reconstruct_error = 0
+            
 
+
+            print(f"max_rank = {self.max_rank}")
             if self.max_rank == 1:
 
                 if self.enable_logging:
@@ -213,7 +218,7 @@ class AdaGramPS(AdaGram):
                 # g_p_proj = (g_bar @ state["P"]).reshape(-1) 
 
                 # update = (beta * g_bar_col) @ (g_bar - g_p_proj @ state["Q"].T).reshape(1, -1)
-
+                print("running needed mehtod")
                 state["U"], state["S"], state["V"] = self.reduce_rank_psi(
                     beta, g_bar, state["U"], state["S"], state["V"]
                 )  # here all the matrices are not transposed
