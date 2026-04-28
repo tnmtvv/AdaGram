@@ -108,12 +108,15 @@ class AdaGramPS(AdaGram):
 
         t = g @ U_cur                     
         w = g - V_0 @ (S_0.T @ (U_0.T @ g)) # (n,)
+        print(f"w, {w.shape}")
+        print(f"t, {t.shape}")
         delta_au = b * w[:, None] @ t[None, :] # (n, r) outer product
+        print(f"delta au, {delta_au.shape}")
 
         # L step
         L_cur = (V_0 @ S_tild.T) + delta_au     # (n, r)
-        print("S_tild.T", S_tild.T.shape)
-        print("V_0", V_0.T.shape)
+        # print("S_tild.T", S_tild.T.shape)
+        # print("V_0", V_0.T.shape)
         
         V_cur, S_cur_T = torch.linalg.qr(L_cur)
 
@@ -174,7 +177,6 @@ class AdaGramPS(AdaGram):
         beta: torch.Tensor,
         g_bar: torch.Tensor,
     ):
-        print("update PQ here")
         beta_g = (beta * g_bar).reshape(-1, 1)
         g_bar_col = g_bar.reshape(-1, 1)
 
@@ -196,9 +198,6 @@ class AdaGramPS(AdaGram):
                 self._faster_svd(state)
                 reconstruct_error = 0
             
-
-
-            print(f"max_rank = {self.max_rank}")
             if self.max_rank == 1:
 
                 if self.enable_logging:
@@ -218,7 +217,6 @@ class AdaGramPS(AdaGram):
                 # g_p_proj = (g_bar @ state["P"]).reshape(-1) 
 
                 # update = (beta * g_bar_col) @ (g_bar - g_p_proj @ state["Q"].T).reshape(1, -1)
-                print("running needed mehtod")
                 state["U"], state["S"], state["V"] = self.reduce_rank_psi(
                     beta, g_bar, state["U"], state["S"], state["V"]
                 )  # here all the matrices are not transposed
