@@ -92,7 +92,7 @@ class AdaGramPS(AdaGram):
             alpha = 1 
 
         vv   = V_0.T @ V_0                 # (r, r)
-        g_us = g @ (U_0 @ S_0)             # (r,)
+        g_us = (g @ U_0) @ S_0          # (r,)
         gv   = g @ V_0                     # (r,)
 
         l_r = b * (gv - g_us @ vv)         # (r,)
@@ -108,10 +108,10 @@ class AdaGramPS(AdaGram):
 
         t = g @ U_cur                     
         w = g - V_0 @ (S_0.T @ (U_0.T @ g)) # (n,)
-        print(f"w, {w.shape}")
-        print(f"t, {t.shape}")
+        # print(f"w, {w.shape}")
+        # print(f"t, {t.shape}")
         delta_au = b * w[:, None] @ t[None, :] # (n, r) outer product
-        print(f"delta au, {delta_au.shape}")
+        # print(f"delta au, {delta_au.shape}")
 
         # L step
         L_cur = (V_0 @ S_tild.T) + delta_au     # (n, r)
