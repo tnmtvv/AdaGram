@@ -15,7 +15,9 @@ from .libcontext import *
 from .Shampoo import *
 from .AdamGram import *
 from .Shampoo import *
-from .SymAdaGram import *
+from .SymAdaGram import * 
+from .AdagramSqrtPS import *
+from .AdagramSqrtSVD import *
 
 
 
@@ -35,6 +37,8 @@ __all__ = [
     'AdamGram',
     'SymAdamGram',
     'EQAdamGram',
-    'SVDAdamGram'
+    'SVDAdamGram',
+    'AdagramSqrtPS',
+    'AdagramSqrtSVD',
     # Add other class names as needed
 ]

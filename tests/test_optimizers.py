@@ -19,6 +19,8 @@ from src.adagram_optimizers.SymAdaGram import SymAdaGram
 from src.adagram_optimizers.AdamGram import SymAdamGram
 from src.adagram_optimizers.AdamGram import SVDAdamGram
 from src.adagram_optimizers.AdamGram import EQAdamGram
+from src.adagram_optimizers.AdagramSqrtPS import AdaGramPS_Sqrt
+from src.adagram_optimizers.AdagramSqrtSVD import AdaGramFR_Sqrt
 
 
 class OptimizerStateTester:
@@ -268,3 +270,105 @@ class TestOptimizerStateCapture:
 
                     factorize = S * U @ V.T if max_rank == 1 else U @ S @ V.T
                     assert torch.allclose(rec_target, factorize, atol=atol, rtol=atol)
+
+
+class TestAdaGramSqrtVariants:
+    @staticmethod
+    def _explicit_inverse_sqrt_apply(U: torch.Tensor, V: torch.Tensor, eps: float, g: torch.Tensor) -> torch.Tensor:
+        n = g.numel()
+        alpha = 1.0 / eps
+        eye_n = torch.eye(n, device=g.device, dtype=g.dtype)
+        r = U.shape[1]
+        eye_r = torch.eye(r, device=g.device, dtype=g.dtype)
+        zeros = torch.zeros(r, r, device=g.device, dtype=g.dtype)
+
+        UV = torch.cat([U, V], dim=1)
+        VtV = V.T @ V
+        mid = torch.cat(
+            [
+                torch.cat([-VtV, eye_r], dim=1),
+                torch.cat([eye_r, zeros], dim=1),
+            ],
+            dim=0,
+        )
+        G_inv = alpha * eye_n - alpha * (UV @ mid @ UV.T)
+        evals, evecs = torch.linalg.eigh(G_inv)
+        G_inv_sqrt = evecs @ torch.diag(torch.sqrt(torch.clamp(evals, min=0.0))) @ evecs.T
+        return G_inv_sqrt @ g
+
+    def test_update_grad_vector_matches_explicit_inverse_sqrt(self):
+        torch.manual_seed(7)
+        n = 12
+        r = 3
+        eps = 1e-2
+
+        dummy = nn.Parameter(torch.zeros(1))
+        optimizer = AdaGramPS_Sqrt([dummy], lr=0.1, eps=eps, max_rank=r, enable_logging=False)
+
+        U = 0.04 * torch.randn(n, r, dtype=torch.float64)
+        V = 0.04 * torch.randn(n, r, dtype=torch.float64)
+        g = torch.randn(n, dtype=torch.float64)
+        state = {
+            "L_0_inv": torch.tensor(1.0 / torch.sqrt(torch.tensor(eps, dtype=torch.float64)), dtype=torch.float64),
+            "P": U,
+            "Q": V,
+        }
+
+        got = optimizer.update_grad_vector(state, g)
+        expected = self._explicit_inverse_sqrt_apply(U, V, eps, g)
+        assert torch.allclose(got, expected, atol=1e-8, rtol=1e-7)
+
+    def test_update_grad_vector_base_term_without_factors(self):
+        torch.manual_seed(8)
+        eps = 1e-2
+        n = 10
+        dummy = nn.Parameter(torch.zeros(1))
+        optimizer = AdaGramPS_Sqrt([dummy], lr=0.1, eps=eps, enable_logging=False)
+
+        g = torch.randn(n, dtype=torch.float64)
+        inv_sqrt_eps = 1.0 / torch.sqrt(torch.tensor(eps, dtype=torch.float64))
+        state = {"L_0_inv": inv_sqrt_eps}
+
+        got = optimizer.update_grad_vector(state, g)
+        expected = inv_sqrt_eps * g
+        assert torch.allclose(got, expected, atol=1e-10, rtol=1e-10)
+
+    def test_adagram_sqrt_ps_update_pq_shapes(self):
+        torch.manual_seed(9)
+        n = 15
+        g_bar = torch.randn(n, dtype=torch.float64)
+        beta = torch.tensor(0.15, dtype=torch.float64)
+        dummy = nn.Parameter(torch.zeros(1))
+        optimizer = AdaGramPS_Sqrt([dummy], lr=0.1, eps=1e-2, max_rank=4, enable_logging=False)
+
+        state: Dict[str, Any] = {}
+        P, Q, rec_err = optimizer.update_PQ(state, beta, g_bar)
+        assert P.shape == (n, 1)
+        assert Q.shape == (n, 1)
+        assert torch.isfinite(rec_err)
+
+        state["P"], state["Q"] = P, Q
+        P2, Q2, rec_err2 = optimizer.update_PQ(state, beta, g_bar)
+        assert P2.shape[0] == n and Q2.shape[0] == n
+        assert P2.shape[1] == Q2.shape[1]
+        assert torch.isfinite(rec_err2)
+
+    def test_adagram_sqrt_svd_update_pq_shapes(self):
+        torch.manual_seed(10)
+        n = 15
+        g_bar = torch.randn(n, dtype=torch.float64)
+        beta = torch.tensor(0.2, dtype=torch.float64)
+        dummy = nn.Parameter(torch.zeros(1))
+        optimizer = AdaGramFR_Sqrt([dummy], lr=0.1, eps=1e-2, max_rank=2, enable_logging=False)
+
+        state: Dict[str, Any] = {}
+        P, Q, rec_err = optimizer.update_PQ(state, beta, g_bar)
+        assert P.shape == (n, 1)
+        assert Q.shape == (n, 1)
+        assert torch.isfinite(rec_err)
+
+        state["P"], state["Q"] = P, Q
+        P2, Q2, rec_err2 = optimizer.update_PQ(state, beta, g_bar)
+        assert P2.shape[0] == n and Q2.shape[0] == n
+        assert P2.shape[1] == Q2.shape[1]
+        assert torch.isfinite(rec_err2)
