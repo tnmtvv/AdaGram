@@ -43,6 +43,7 @@ class AdaGramSqrt(Optimizer, ABC):
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
         defaults = dict(lr=lr, eps=eps, weight_decay=weight_decay, max_rank=max_rank)
+        super(AdaGramSqrt, self).__init__(params, defaults)
         self.lr = lr
         self.eps = eps
         self.max_rank = max_rank

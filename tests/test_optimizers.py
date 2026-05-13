@@ -372,3 +372,29 @@ class TestAdaGramSqrtVariants:
         assert P2.shape[0] == n and Q2.shape[0] == n
         assert P2.shape[1] == Q2.shape[1]
         assert torch.isfinite(rec_err2)
+
+    @pytest.mark.parametrize("optimizer_cls", [AdaGramPS_Sqrt, AdaGramFR_Sqrt])
+    def test_sqrt_optimizers_have_param_groups_and_state_initialized(self, optimizer_cls):
+        torch.manual_seed(11)
+        model = nn.Linear(6, 2)
+        optimizer = optimizer_cls(
+            model.parameters(),
+            lr=0.05,
+            eps=1e-2,
+            max_rank=2,
+            enable_logging=False,
+        )
+
+        assert hasattr(optimizer, "param_groups")
+        assert len(optimizer.param_groups) > 0
+
+        x = torch.randn(4, 6)
+        y = torch.randn(4, 2)
+        loss = nn.MSELoss()(model(x), y)
+        loss.backward()
+        optimizer.step()
+
+        first_param = next(model.parameters())
+        state = optimizer.state[first_param]
+        assert "step_count" in state and state["step_count"] >= 1
+        assert "L_0_inv" in state
