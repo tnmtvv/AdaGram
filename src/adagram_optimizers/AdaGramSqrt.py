@@ -118,29 +118,74 @@ class AdaGramSqrt(Optimizer, ABC):
         state["L_0_inv"] = 1 / state["L_0"]
         state["step_count"] = 0
 
+    # def update_grad_vector(self, state, grad_vector):
+    #     inv_sqrt_eps = torch.as_tensor(
+    #         state["L_0_inv"], device=grad_vector.device, dtype=grad_vector.dtype
+    #     )
+    #     g = grad_vector.reshape(-1)
+    #     base_term = inv_sqrt_eps * g
+
+    #     if "P" not in state or "Q" not in state:
+    #         return base_term
+
+    #     U, V = state["P"], state["Q"]
+    #     if U.numel() == 0 or V.numel() == 0:
+    #         return base_term
+
+    #     alpha = inv_sqrt_eps * inv_sqrt_eps
+    #     r = U.shape[1]
+
+    #     UV = torch.cat([U, V], dim=1)
+    #     Q_hat, R_hat = torch.linalg.qr(UV, mode="reduced")
+
+    #     VtV = V.T @ V
+    #     eye_r = torch.eye(r, device=U.device, dtype=U.dtype)
+    #     zeros = torch.zeros(r, r, device=U.device, dtype=U.dtype)
+    #     mid = torch.cat(
+    #         [
+    #             torch.cat([-VtV, eye_r], dim=1),
+    #             torch.cat([eye_r, zeros], dim=1),
+    #         ],
+    #         dim=0,
+    #     )
+    #     M = R_hat @ mid @ R_hat.T
+
+    #     eigvals, S = torch.linalg.eigh(M)
+    #     sigma = alpha * eigvals
+    #     D = torch.sqrt(torch.clamp(alpha - sigma, min=0.0)) - inv_sqrt_eps
+
+    #     c = S.T @ (Q_hat.T @ g)
+    #     d = D * c
+
+    #     return Q_hat @ (S @ d) + base_term
+
+
     def update_grad_vector(self, state, grad_vector):
-        inv_sqrt_eps = torch.as_tensor(
-            state["L_0_inv"], device=grad_vector.device, dtype=grad_vector.dtype
-        )
+        inv_sqrt_eps = torch.as_tensor( state["L_0_inv"], dtype=grad_vector.dtype    )
         g = grad_vector.reshape(-1)
         base_term = inv_sqrt_eps * g
-
+    
         if "P" not in state or "Q" not in state:
             return base_term
-
+    
         U, V = state["P"], state["Q"]
         if U.numel() == 0 or V.numel() == 0:
             return base_term
-
-        alpha = inv_sqrt_eps * inv_sqrt_eps
-        r = U.shape[1]
-
-        UV = torch.cat([U, V], dim=1)
+    
+        # ✅ upcast everything to float32 for stable linear algebra
+        U32 = U.float()
+        V32 = V.float()
+        g32 = g.float()
+        alpha = inv_sqrt_eps.float() ** 2
+        inv_sqrt_eps32 = inv_sqrt_eps.float()
+        r = U32.shape[1]
+    
+        UV = torch.cat([U32, V32], dim=1)
         Q_hat, R_hat = torch.linalg.qr(UV, mode="reduced")
-
-        VtV = V.T @ V
-        eye_r = torch.eye(r, device=U.device, dtype=U.dtype)
-        zeros = torch.zeros(r, r, device=U.device, dtype=U.dtype)
+    
+        VtV = V32.T @ V32
+        eye_r = torch.eye(r, device=U.device, dtype=torch.float32)
+        zeros = torch.zeros(r, r, device=U.device, dtype=torch.float32)
         mid = torch.cat(
             [
                 torch.cat([-VtV, eye_r], dim=1),
@@ -149,15 +194,19 @@ class AdaGramSqrt(Optimizer, ABC):
             dim=0,
         )
         M = R_hat @ mid @ R_hat.T
-
+    
+        # ✅ symmetrize explicitly to fix any floating point asymmetry
+        M = (M + M.T) * 0.5
+    
         eigvals, S = torch.linalg.eigh(M)
         sigma = alpha * eigvals
-        D = torch.sqrt(torch.clamp(alpha - sigma, min=0.0)) - inv_sqrt_eps
-
-        c = S.T @ (Q_hat.T @ g)
+        D = torch.sqrt(torch.clamp(alpha - sigma, min=0.0)) - inv_sqrt_eps32
+    
+        c = S.T @ (Q_hat.T @ g32)
         d = D * c
-
-        return Q_hat @ (S @ d) + base_term
+    
+        # ✅ cast result back to original dtype
+        return (Q_hat @ (S @ d) + inv_sqrt_eps32 * g32).to(grad_vector.dtype)
 
 
     def calculate_coeffs(
