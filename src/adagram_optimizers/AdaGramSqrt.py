@@ -197,6 +197,12 @@ class AdaGramSqrt(Optimizer, ABC):
     
         # ✅ symmetrize explicitly to fix any floating point asymmetry
         M = (M + M.T) * 0.5
+
+        eigvals_check = torch.linalg.eigvalsh(M)
+        print("max lambda(M):", eigvals_check.max().item())
+        print("violates lambda_i <= 1:", bool((eigvals_check > 1).any()))
+        print("has nan/inf:", bool((~torch.isfinite(M)).any()))
+
     
         eigvals, S = torch.linalg.eigh(M)
         sigma = alpha * eigvals
