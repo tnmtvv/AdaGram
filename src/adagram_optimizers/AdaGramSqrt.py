@@ -182,6 +182,7 @@ class AdaGramSqrt(Optimizer, ABC):
     
         UV = torch.cat([U32, V32], dim=1)
         Q_hat, R_hat = torch.linalg.qr(UV, mode="reduced")
+
     
         VtV = V32.T @ V32
         eye_r = torch.eye(r, device=U.device, dtype=torch.float32)
@@ -197,6 +198,9 @@ class AdaGramSqrt(Optimizer, ABC):
     
         # ✅ symmetrize explicitly to fix any floating point asymmetry
         M = (M + M.T) * 0.5
+        sym_err = (M - M.T).abs().max().item()
+        if sym_err > 1e-5:
+            print(f"Warning: M is not symmetric enough, max error = {sym_err:.3e}")
 
         eigvals_check = torch.linalg.eigvalsh(M)
         print("max lambda(M):", eigvals_check.max().item())
