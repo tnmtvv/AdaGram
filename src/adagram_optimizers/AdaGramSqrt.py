@@ -201,6 +201,8 @@ class AdaGramSqrt(Optimizer, ABC):
         sym_err = (M - M.T).abs().max().item()
         if sym_err > 1e-5:
             print(f"Warning: M is not symmetric enough, max error = {sym_err:.3e}")
+        else:
+            print("M is symmetric")
 
         eigvals_check = torch.linalg.eigvalsh(M)
         print("max lambda(M):", eigvals_check.max().item())
