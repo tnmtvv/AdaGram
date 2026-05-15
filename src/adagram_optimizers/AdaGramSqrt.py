@@ -212,8 +212,8 @@ class AdaGramSqrt(Optimizer, ABC):
     
         try:
             eigvals, S = torch.linalg.eigh(M)
-        except RuntimeError:
-            print("EIG failed, trying to do on CPU")
+        except Exception as e:
+            print("EIG failed")
             
 
             if not torch.isfinite(eigvals).all():
