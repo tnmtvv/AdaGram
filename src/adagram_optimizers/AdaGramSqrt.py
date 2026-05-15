@@ -212,26 +212,27 @@ class AdaGramSqrt(Optimizer, ABC):
     
         try:
             eigvals, S = torch.linalg.eigh(M)
+        
         except Exception as e:
-            print("EIG failed")
-            
-
-            if not torch.isfinite(eigvals).all():
-                print("M has inf or nan")
-                return base_term
-
+            print(f"EIG failed: {e}; falling back to SVD")
+        
             try:
                 Phi_M, sv_M, Vh_M = torch.linalg.svd(M, full_matrices=False)
             except RuntimeError:
-                print("SVD failed, trying to do on CPU")
+                print("SVD failed on device; retrying on CPU/float64")
                 M_cpu = M.detach().cpu().double()
                 Phi_cpu, sv_cpu, Vh_cpu = torch.linalg.svd(M_cpu, full_matrices=False)
                 Phi_M = Phi_cpu.to(M.device, dtype=M.dtype)
                 sv_M  = sv_cpu.to(M.device, dtype=M.dtype)
                 Vh_M  = Vh_cpu.to(M.device, dtype=M.dtype)
-
-
+        
             Psi_M = Vh_M.T
+            abs_diff = (Phi_M.abs() - Psi_M.abs()).abs().max().item()
+            if abs_diff < 1e-3:
+                S = Phi_M
+            else:
+                S = Phi_M @ Psi_M.T
+            eigvals = sv_M
             # Одна проверка: совпадают ли левые и правые сингулярные векторы
             abs_diff = (Phi_M.abs() - Psi_M.abs()).abs().max().item()
             if abs_diff < 1e-3:
