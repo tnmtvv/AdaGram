@@ -198,19 +198,48 @@ class AdaGramSqrt(Optimizer, ABC):
     
         # ✅ symmetrize explicitly to fix any floating point asymmetry
         M = (M + M.T) * 0.5
-        sym_err = (M - M.T).abs().max().item()
-        if sym_err > 1e-5:
-            print(f"Warning: M is not symmetric enough, max error = {sym_err:.3e}")
-        else:
-            print("M is symmetric")
+        # sym_err = (M - M.T).abs().max().item()
+        # if sym_err > 1e-5:
+        #     print(f"Warning: M is not symmetric enough, max error = {sym_err:.3e}")
+        # else:
+        #     print("M is symmetric")
 
-        eigvals_check = torch.linalg.eigvalsh(M)
-        print("max lambda(M):", eigvals_check.max().item())
-        print("violates lambda_i <= 1:", bool((eigvals_check > 1).any()))
-        print("has nan/inf:", bool((~torch.isfinite(M)).any()))
+        # eigvals_check = torch.linalg.eigvalsh(M)
+        # print("max lambda(M):", eigvals_check.max().item())
+        # print("violates lambda_i <= 1:", bool((eigvals_check > 1).any()))
+        # print("has nan/inf:", bool((~torch.isfinite(M)).any()))
 
     
-        eigvals, S = torch.linalg.eigh(M)
+        # eigvals, S = torch.linalg.eigh(M)
+
+
+        if not torch.isfinite(M).all():
+            print("M has inf or nan")
+            return base_term
+
+        try:
+            Phi_M, sv_M, Vh_M = torch.linalg.svd(M, full_matrices=False)
+        except RuntimeError:
+            print("SVD failed, trying to do on CPU")
+            M_cpu = M.detach().cpu().double()
+            Phi_cpu, sv_cpu, Vh_cpu = torch.linalg.svd(M_cpu, full_matrices=False)
+            Phi_M = Phi_cpu.to(M.device, dtype=M.dtype)
+            sv_M  = sv_cpu.to(M.device, dtype=M.dtype)
+            Vh_M  = Vh_cpu.to(M.device, dtype=M.dtype)
+
+        Psi_M = Vh_M.T
+
+    # Одна проверка: совпадают ли левые и правые сингулярные векторы
+        uv_diff = (Phi_M - Psi_M).norm().item()
+        if uv_diff < 1e-3:
+            print(f"Phi ≈ Psi (diff={uv_diff:.2e}); using Phi_M")
+            S = Phi_M
+        else:
+            print(f"Phi ≠ Psi (diff={uv_diff:.2e}); using Phi_M @ Psi_M.T")
+            S = Phi_M @ Psi_M.T
+
+        eigvals = sv_M
+        
         sigma = alpha * eigvals
         D = torch.sqrt(torch.clamp(alpha - sigma, min=0.0)) - inv_sqrt_eps32
     
