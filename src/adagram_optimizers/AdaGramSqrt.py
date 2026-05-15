@@ -229,13 +229,13 @@ class AdaGramSqrt(Optimizer, ABC):
 
         Psi_M = Vh_M.T
 
-    # Одна проверка: совпадают ли левые и правые сингулярные векторы
-        uv_diff = (Phi_M - Psi_M).norm().item()
-        if uv_diff < 1e-3:
-            print(f"Phi ≈ Psi (diff={uv_diff:.2e}); using Phi_M")
-            S = Phi_M
+        # Одна проверка: совпадают ли левые и правые сингулярные векторы
+        abs_diff = (Phi_M.abs() - Psi_M.abs()).abs().max().item()
+        if abs_diff < 1e-3:
+           print(f"Phi ≈ Psi elementwise (max |Phi|-|Psi| diff={abs_diff:.2e}); using Phi_M")
+           S = Phi_M
         else:
-            print(f"Phi ≠ Psi (diff={uv_diff:.2e}); using Phi_M @ Psi_M.T")
+            print(f"Phi ≠ Psi elementwise (max |Phi|-|Psi| diff={abs_diff:.2e}); using Phi_M @ Psi_M.T")
             S = Phi_M @ Psi_M.T
 
         eigvals = sv_M
