@@ -1,7 +1,8 @@
 import torch
 
 from typing import Optional, Dict, Any, Tuple
-from src.adagram_base import AdaGram, AdaGramLogger
+
+from AdagramBase import AdaGram, AdaGramLogger
 
 
 class AdaGramVanilla(AdaGram):
@@ -43,7 +44,7 @@ class AdaGramVanilla(AdaGram):
             Q = g_bar_col
             reconstruct_error = torch.tensor(0.0)
         else:
-            v_upd = (g_bar - state["Q"] @ (state["P"].T @ g_bar)).reshape(-1, 1)
+            v_upd = (g_bar_col - state["Q"] @ (state["P"].T @ g_bar_col))
 
             P = torch.cat([state["P"], beta_g], dim=1)
             Q = torch.cat([state["Q"], v_upd], dim=1)

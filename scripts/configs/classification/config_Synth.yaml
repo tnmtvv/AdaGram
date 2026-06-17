@@ -6,8 +6,8 @@ experiment:
 # Data Configuration
 data:
   n_samples: 300
-  in_dims: [22]
-  out_dims: [1]
+  in_dims: [20]
+  out_dims: [2]
   test_size: 0.2
   data_seeds: [1, 2, 3, 4, 5, 10]
 
@@ -29,6 +29,14 @@ models:
 # Optimizer Configuration (with specific hyperparameters for each)
 
 optimizers:
+  FullAdaGrad:
+    enabled: true
+    requires_rank: false
+    # --- FullAdaGrad-specific hyperparameters ---
+    learning_rates: [0.1]
+    batch_size: [32]                     # change for gradients
+    eps: [0.1]
+  # --- Other optimizers would follow the same pattern ---
 
   AdaGramPS:
     enabled: false
@@ -40,65 +48,55 @@ optimizers:
     eps: [1e-3, 1e-4, 1e-5, 1e-2, 0.1, 0.5]
     ranks: [1, 2, 3, 4, 5, null]
 
-  FullAdaGrad:
-    enabled: true
-    requires_rank: false
-    # --- FullAdaGrad-specific hyperparameters ---
-    learning_rates: [0.1]
-    batch_size: [1]                      # change for gradients
-    eps: [0.5]
-  # --- Other optimizers would follow the same pattern ---
-
-
-
   Shampoo:
     enabled: true
     requires_rank: false
     learning_rates: [0.1]
     eps: [0.001]
-    batch_size: [1]
+    batch_size: [64]
 
   KATE:
     enabled: true
     requires_rank: false
     # --- KATE-specific hyperparameters would go here ---
-    learning_rates: [0.1]
+    learning_rates: [0.05]
     batch_size: [1]
-    eps: [0.001]
+    eps: [0.0001]
+
 
   Torch_Adagrad:
     enabled: true
     requires_rank: false
     # --- Torch Adagrad-specific hyperparameters ---
     learning_rates: [0.1]                                                                             # Adagrad often works well with higher LRs
-    batch_size: [1]
-    eps: [0.001]
+    batch_size: [32]
+    eps: [0.5]
 
   Vanilla_SGD:
     enabled: true
     requires_rank: false
     # --- SGD-specific hyperparameters (note: no 'eps' or 'ranks') ---
-    learning_rates: [0.1]
-    batch_size: [64]
+    learning_rates: [0.05]
+    batch_size: [32]
     eps: [nan]
   AdaGramPS rank 1: {enabled: true, requires_rank: true, testing: false, 
-      learning_rates: [0.1], batch_size: [1], alphas: [.nan], eps: [0.5], ranks: [
-      1]}
-  AdaGramPS rank 2: {enabled: true, requires_rank: true, testing: false, 
-      learning_rates: [0.1], batch_size: [1], alphas: [.nan], eps: [1e-05], 
-      ranks: [2]}
-  AdaGramPS rank 3: {enabled: true, requires_rank: true, testing: false, 
-      learning_rates: [0.1], batch_size: [1], alphas: [.nan], eps: [1e-05], 
-      ranks: [3]}
-  AdaGramPS rank 5: {enabled: true, requires_rank: true, testing: false, 
-      learning_rates: [0.1], batch_size: [1], alphas: [.nan], eps: [1e-05], 
-      ranks: [5]}
-  AdaGramPS rank 4: {enabled: true, requires_rank: true, testing: false, 
-      learning_rates: [0.1], batch_size: [1], alphas: [.nan], eps: [1e-05], 
-      ranks: [4]}
+      learning_rates: [0.01], batch_size: [1], alphas: [.nan], eps: [0.01], 
+      ranks: [1]}
   AdaGramPS_fullrank: {enabled: true, requires_rank: true, testing: false, 
       learning_rates: [0.1], batch_size: [1], alphas: [.nan], eps: [0.5], ranks: [
       null]}
+  AdaGramPS rank 2: {enabled: true, requires_rank: true, testing: false, 
+      learning_rates: [0.1], batch_size: [1], alphas: [.nan], eps: [0.001], 
+      ranks: [2]}
+  AdaGramPS rank 5: {enabled: true, requires_rank: true, testing: false, 
+      learning_rates: [0.1], batch_size: [1], alphas: [.nan], eps: [0.5], ranks: [
+      5]}
+  AdaGramPS rank 4: {enabled: true, requires_rank: true, testing: false, 
+      learning_rates: [0.1], batch_size: [1], alphas: [.nan], eps: [0.5], ranks: [
+      4]}
+  AdaGramPS rank 3: {enabled: true, requires_rank: true, testing: false, 
+      learning_rates: [0.1], batch_size: [32], alphas: [.nan], eps: [0.5], ranks: [
+      3]}
 
 # Output Configuration
 output:
@@ -108,13 +106,13 @@ output:
 
 # Tasks Configuration
 tasks:
-  enabled_tasks: ["LinReg"] # Options: ["BinClass", "LinReg"]
+  enabled_tasks: ["BinClass"] # Options: ["BinClass", "LinReg"]
 
 # Dataset Configuration
 dataset:
-  type: "Aids" # Options: SparseDataset, CorrelatedDataset, LinearDataset, MNIST, AU, Heart
+  type: "SparseDataset" # Options: SparseDataset, CorrelatedDataset, LinearDataset, MNIST, AU, Heart
   sparse_config:
-    if_class: false
+    if_class: true
   correlated_config:
     correlation: 0.8
   linear_config:

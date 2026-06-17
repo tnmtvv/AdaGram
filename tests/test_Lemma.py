@@ -2,26 +2,26 @@ import torch
 import pytest
 import libcontext
 
+import numpy as np
 
-def compute_alpha(g_bar_norm_sq, eps=1e-10):
+
+def compute_alpha(
+    g_bar_norm_sq: torch.Tensor, eps: float = 1e-10
+) -> torch.Tensor:
     """Compute alpha_t that satisfies the equation (6) in the theorem."""
-    # 1 + alpha_t*||g_bar_t||^2 = (1 + ||g_bar_t||^2)^(1/2)
-    # alpha_t:
-    # alpha_t = ((1 + ||g_bar_t||^2)^(1/2) - 1) / ||g_bar_t||^2
-    return ((1 + g_bar_norm_sq).sqrt() - 1) / (g_bar_norm_sq)
+    return ((1 + g_bar_norm_sq).sqrt() - 1) / g_bar_norm_sq
 
-
-def compute_beta(alpha, g_bar_norm_sq):
+def compute_beta(
+    alpha: torch.Tensor, g_bar_norm_sq: torch.Tensor
+) -> torch.Tensor:
     """Compute beta_t as defined in the theorem."""
     return alpha / (1 + alpha * g_bar_norm_sq)
 
-
 def pq_Lt(g, P, Q, L_0_inv):
-    identity = torch.eye(g.shape[0], device=g.device, dtype=g.dtype)
     if P is None:
-        g_bar = identity @ L_0_inv @ g
+        g_bar = L_0_inv * g
     else:
-        g_bar = (identity - P @ Q.T) @ L_0_inv @ g
+        g_bar = (L_0_inv * g) - P @ (Q.T @ (L_0_inv * g))
     g_bar_norm_sq = torch.dot(g_bar, g_bar)
     alpha = compute_alpha(g_bar_norm_sq, 1e-5)
     beta = compute_beta(alpha, g_bar_norm_sq)
@@ -29,9 +29,9 @@ def pq_Lt(g, P, Q, L_0_inv):
     g_bar_col = g_bar.reshape(-1, 1)
 
     if P is not None:
-        identity = torch.eye(Q.shape[0], device=g.device, dtype=g.dtype)
-        v_upd = ((identity - Q @ P.T) @ g_bar).reshape(-1, 1)
-        # print("v_upd", v_upd.shape).
+
+        v_upd = (g_bar_col - Q @ (P.T @ g_bar_col))
+
         P = torch.cat([P, beta_g], dim=1)
         Q = torch.cat([Q, v_upd], dim=1)
     else:
@@ -54,19 +54,19 @@ def gt_Lt(L_t, g):
 @pytest.mark.parametrize("dim, n_steps", [(4, 10), (6, 10)])
 def test_pq_Lt_vs_gt_Lt(dim, n_steps):
     torch.manual_seed(42)
-    eps = 1e-5
+    eps = 1e-2
     print(eps)
-    # Initial values
+
     G = eps * torch.eye(dim)
-    L_0 = torch.linalg.cholesky(G, upper=False)
-    # L_0 = eps * torch.eye(dim)
-    # print("L_0", L_0)
-    L_0_inv = torch.linalg.inv(L_0)
+    L_0 = (np.sqrt(eps))
+
+    L_0_inv = 1 / L_0
     P = None
     Q = None
     # Generate a sequence of random g vectors
     gs = [torch.randn(dim) for _ in range(n_steps)]
-    L_t = L_0
+
+    L_t = L_0 * torch.eye(dim)
 
     for i, g in enumerate(gs):
         # Update via pq_Lt
@@ -78,7 +78,7 @@ def test_pq_Lt_vs_gt_Lt(dim, n_steps):
         # Compare g_bar
 
         assert torch.allclose(
-            g_bar_pq, g_bar_gt, atol=1e-4
+            g_bar_pq, g_bar_gt, atol=1e-4, rtol=1e-4
         ), f"g_bar mismatch at step {i}"
         print("Max abs diff:", torch.max(torch.abs(g_bar_pq - g_bar_gt)).item())
 

@@ -1,3 +1,5 @@
+import yaml
+
 class Config:
     """Configuration management class"""
 
@@ -10,7 +12,7 @@ class Config:
         keys = key_path.split(".")
         value = self.config
 
-        for key in keys:
+        for key in keys: 
             if isinstance(value, dict) and key in value:
                 value = value[key]
             else:

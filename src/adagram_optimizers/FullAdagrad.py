@@ -3,8 +3,6 @@ from torch.optim import Optimizer
 import csv
 import os
 
-from copy import deepcopy
-
 
 class FullAdaGrad(Optimizer):
     def __init__(
@@ -150,33 +148,12 @@ class FullAdaGrad(Optimizer):
                     # clamped_eigenvals = torch.clamp(eigenvals, min=0.0)
                     # sqrt_eigenvals = torch.sqrt(clamped_eigenvals + 0.0001)
                     sqr_G = eigenvecs @ torch.diag(eigenvals) @ eigenvecs.T
-                    # print("eigenvals", eigenvals)
-                    # sqrt_G = torch.linalg.cholesky(state["G"])
 
-                    # try:
-                        # Attempt to invert the matrix and compute the preconditioned gradient
                     precond_grad = torch.linalg.inv(sqr_G) @ grad_vector
-
-                    # except torch.linalg.LinAlgError:
-                    #     print("state G \n", state["G"])
-                    #     print("state G symetric\n", torch.allclose(state["G"], state["G"].T))
-                    #     print("eigenvals\n", eigenvals)
-                    #     print("grad_vector\n", grad_vector)
-
-                    if state["step_count"] == 1:
-                        print("state G \n", state["G"])
-                        print("state G symetric\n", torch.allclose(state["G"], state["G"].T))
-                        print("eigenvals\n", eigenvals)
-                        print("grad_vector\n", grad_vector)
-                        print("precond_grad\n", precond_grad)
                         
-                    old_p = deepcopy(param_vector)
                     param_vector.add_(precond_grad, alpha=-group["lr"])
-                    # if state["step_count"] == 1:
-                    #     print("old_p\n", old_p)
-                    #     print("param_vector\n", param_vector.reshape(original_shape))
                     p.data = param_vector.reshape(original_shape)
-                    p.grad.data = precond_grad
+                    p.grad.data = precond_grad # for analysis
                     state["step_count"] += 1
 
         return loss

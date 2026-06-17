@@ -9,7 +9,7 @@ data:
   in_dims: [122]
   out_dims: [1]
   test_size: 0.2
-  data_seeds: [1, 2, 3, 4, 5]
+  data_seeds: [1, 2, 3, 4, 5, 10]
 
 # Global Training Configuration (for settings that apply to ALL runs)
 training:
@@ -33,8 +33,19 @@ optimizers:
     requires_rank: false
     # --- FullAdaGrad-specific hyperparameters ---
     learning_rates: [0.1]
-    batch_size: [32]    # change for gradients
+    batch_size: [32]                     # change for gradients
     eps: [0.5]
+  # --- Other optimizers would follow the same pattern ---
+
+  AdaGramPS:
+    enabled: false
+    requires_rank: true
+    testing: false
+    # --- AdaGramPS-specific hyperparameters ---
+    learning_rates: [0.05, 0.01, 0.1]
+    batch_size: [1, 32, 64]
+    eps: [1e-3, 1e-4, 1e-5, 1e-2, 0.1, 0.5]
+    ranks: [1, 2, 3, 4, 5, null]
 
   Shampoo:
     enabled: true
@@ -51,45 +62,40 @@ optimizers:
     batch_size: [1]
     eps: [0.1]
 
-  AdaGramPS:
-    enabled: true
-    requires_rank: true
-    testing: false
-    # --- AdaGramPS-specific hyperparameters ---
-    learning_rates: [0.01]
-    batch_size: [1]
-    eps: [1.0]
-    ranks: [1]                        # Ranks specific to this optimizer
 
   Torch_Adagrad:
     enabled: true
     requires_rank: false
     # --- Torch Adagrad-specific hyperparameters ---
-    learning_rates: [0.05]                              # Adagrad often works well with higher LRs
+    learning_rates: [0.05]                                                                            # Adagrad often works well with higher LRs
     batch_size: [1]
-    eps: [0.2]
+    eps: [0.01]
 
   Vanilla_SGD:
     enabled: true
     requires_rank: false
     # --- SGD-specific hyperparameters (note: no 'eps' or 'ranks') ---
     learning_rates: [0.01]
-    batch_size: [1]
-    eps: [nan]
-  # --- Other optimizers would follow the same pattern ---
-  AdaGramFR_svd:
-    testing: false
-    enabled: false
-    requires_rank: true
-    learning_rates: [0.01]
     batch_size: [32]
-    eps: [0.5, 0.2, 0.1, 1]
-    ranks: [5, 10]
-
-  AdaGram:
-    testing: false
-    enabled: false
-    requires_rank: false
+    eps: [nan]
+  AdaGramPS_fullrank: {enabled: true, requires_rank: true, testing: false, 
+      learning_rates: [0.05], batch_size: [1], alphas: [.nan], eps: [0.1], ranks: [
+      null]}
+  AdaGramPS rank 5: {enabled: true, requires_rank: true, testing: false, 
+      learning_rates: [0.05], batch_size: [32], alphas: [.nan], eps: [0.5], 
+      ranks: [5]}
+  AdaGramPS rank 4: {enabled: true, requires_rank: true, testing: false, 
+      learning_rates: [0.05], batch_size: [64], alphas: [.nan], eps: [0.5], 
+      ranks: [4]}
+  AdaGramPS rank 2: {enabled: true, requires_rank: true, testing: false, 
+      learning_rates: [0.05], batch_size: [32], alphas: [.nan], eps: [0.5], 
+      ranks: [2]}
+  AdaGramPS rank 1: {enabled: true, requires_rank: true, testing: false, 
+      learning_rates: [0.01], batch_size: [32], alphas: [.nan], eps: [0.1], 
+      ranks: [1]}
+  AdaGramPS rank 3: {enabled: true, requires_rank: true, testing: false, 
+      learning_rates: [0.05], batch_size: [64], alphas: [.nan], eps: [0.5], 
+      ranks: [3]}
 
 # Output Configuration
 output:
@@ -105,7 +111,7 @@ tasks:
 dataset:
   type: "Crime" # Options: SparseDataset, CorrelatedDataset, LinearDataset, MNIST, AU, Heart
   sparse_config:
-    if_class: true
+    if_class: false
   correlated_config:
     correlation: 0.8
   linear_config:

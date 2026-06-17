@@ -6,7 +6,6 @@ import numpy as np
 
 from sklearn.preprocessing import StandardScaler
 
-
 import os
 import pandas as pd
 import torch
@@ -91,48 +90,42 @@ class CorrelatedAnisotropicDataset(Dataset):
     A concrete implementation that generates a dataset with correlated features,
     which is the key to creating an anisotropic loss landscape for logistic regression.
     """
-    def create_data(self, anisotropy_ratio=1e3):
-        # 1. Start with uncorrelated data
-        Z = self.rng.standard_normal(size=(self.n_samples, self.in_dim))
+    # def _toeplitz_ar1_corr(self, rho: float) -> np.ndarray:
+    #     # Toeplitz AR(1) correlation: R[i,j] = rho**|i-j|
+    #     idx = np.arange(self.in_dim)
+    #     return rho ** np.abs(idx[:, None] - idx[None, :])
 
-        # 2. Create a tridiagonal matrix T
-        #    - Main diagonal of 1s
-        #    - Off-diagonals of 0.5 to create local correlation
-        T = np.zeros((self.in_dim, self.in_dim))
-        
-        # Set the main diagonal
-        diag_values = np.logspace(0, np.log(1e3), self.in_dim)
-        np.fill_diagonal(T, diag_values)
-        
-        # Set the upper and lower diagonals
-        # We use slicing to handle the arrays of length (in_dim - 1)
-        random_matrix = self.rng.standard_normal(size=(self.in_dim, self.in_dim))
-        rotation_matrix, _ = np.linalg.qr(random_matrix)
+    # def _safe_cholesky(self, R: np.ndarray, eps0: float = 1e-12, max_tries: int = 8) -> np.ndarray:
+    #     eps = eps0
+    #     for _ in range(max_tries):
+    #         try:
+    #             return np.linalg.cholesky(R)
+    #         except np.linalg.LinAlgError:
+    #             R = R + eps * np.eye(R.shape[0])
+    #             eps *= 10.0
+    #     # Eigenvalue clip fallback
+    #     w, V = np.linalg.eigh(R)
+    #     w = np.clip(w, 1e-10, None)
+    #     R_spd = (V * w) @ V.T
+    #     return np.linalg.cholesky(R_spd)
 
-        # 3. Apply the rotation to create the final correlated weight vector
+    def create_data(self):
+        Z = self.rng.normal(loc=0.0, scale=1.0, size=(self.n_samples, self.in_dim))
 
-        upper_diag = T.diagonal(offset=1)
-        upper_diag.setflags(write=True)
-        upper_vals = np.logspace(0, np.log(1e3), self.in_dim - 1)
-        upper_diag[:] = upper_vals
-        # upper_diag.fill(0.7)
+        diag_vals = 1 + self.rng.uniform(0, 0.1, size=self.in_dim)
+        sub_vals  = 1 + self.rng.uniform(0.1, 0.5, size=self.in_dim - 1)
+    
+        T = np.zeros((self.in_dim, self.in_dim), dtype=float)
+        np.fill_diagonal(T, diag_vals.astype(float))
 
-        lower_diag = T.diagonal(offset=-1)
-        lower_diag.setflags(write=True)
-        lower_vals = np.logspace(0, np.log(1e3), self.in_dim - 1)
-        lower_diag[:] = lower_vals
-        # lower_diag.fill(0.5)
-
-        corr = rotation_matrix @ T
-
-        # 3. Apply the transformation to create locally correlated features
-        X = Z @ T 
-
-        # 4. Generate the probabilistic logistic regression labels
+        T[np.arange(1, self.in_dim), np.arange(self.in_dim - 1)] = sub_vals.astype(float)
+    
+        X = Z @ T
+    
         y = self._generate_labels(X)
 
-        return X, torch.tensor(y.reshape(-1), dtype=torch.long)
-
+        return torch.from_numpy(X).float(), torch.from_numpy(np.asarray(y)).long().flatten()
+    
 # --- Child Classes (Now Simpler) ---
 
 class IsotropicDataset(Dataset):
@@ -541,7 +534,7 @@ class SparseDataset(Dataset):
 
         # Create target: heavily dependent on sparse features
         y = (
-            2.0 * X[:, 0]  # Sparse feature 1 (high weight)
+            5.0 * X[:, 0]  # Sparse feature 1 (high weight)
             + 1.5 * X[:, 1]  # Sparse feature 2 (medium weight)
             + 0.3
             * X[:, 2 : min(5, self.in_dim)].sum(dim=1)  # Dense features (low weight)
