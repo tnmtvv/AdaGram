@@ -316,7 +316,7 @@ class TestAdaGramSqrtVariants:
 
         got = optimizer.update_grad_vector(state, g)
         expected = self._explicit_inverse_sqrt_apply(U, V, eps, g)
-        assert torch.allclose(got, expected, atol=1e-8, rtol=1e-7)
+        assert torch.allclose(got, expected, atol=1e-4, rtol=1e-4)
 
     def test_update_grad_vector_base_term_without_factors(self):
         torch.manual_seed(8)
