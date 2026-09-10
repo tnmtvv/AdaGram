@@ -9,7 +9,7 @@ def compute_alpha(
     g_bar_norm_sq: torch.Tensor, eps: float = 1e-10
 ) -> torch.Tensor:
     """Compute alpha_t that satisfies the equation (6) in the theorem."""
-    return ((1 + g_bar_norm_sq).sqrt() - 1) / g_bar_norm_sq
+    return 1 / ((1 + g_bar_norm_sq).sqrt() + 1)
 
 def compute_beta(
     alpha: torch.Tensor, g_bar_norm_sq: torch.Tensor

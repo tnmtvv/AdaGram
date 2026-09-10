@@ -100,7 +100,7 @@ class FullAdaGrad(Optimizer):
 
     def _compute_alpha(self, g_bar_norm_sq, eps=1e-10):
         """Compute alpha_t that satisfies the equation (6) in the theorem."""
-        return ((1 + g_bar_norm_sq).sqrt() - 1) / (g_bar_norm_sq)
+        return 1 / ((1 + g_bar_norm_sq).sqrt() + 1)
 
     def _compute_beta(self, alpha, g_bar_norm_sq):
         """Compute beta_t as defined in the theorem."""
